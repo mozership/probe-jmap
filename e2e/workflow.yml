@@ -189,7 +189,7 @@ jobs:
         id: identities
     test: |
       status == 0 &&
-      res.req.url == vars.base + "/jmap/" &&
+      req.url == vars.base + "/jmap/" &&
       find(res.results.mailboxes.list, #.role == "sent") != nil
     outputs:
       sent: 'find(res.results.mailboxes.list, #.role == "sent").id'
@@ -220,8 +220,8 @@ jobs:
         id: identities
     test: status == 0 && len(res.results.identities.list) > 0
     outputs:
-      id: res.results.identities.list[0].id
-      email: res.results.identities.list[0].email
+      identity_id: res.results.identities.list[0].id
+      identity_email: res.results.identities.list[0].email
 
   # Email/set makes the message in the sent mailbox, and EmailSubmission/set
   # sends it, naming the message by the creation id "#msg".
@@ -239,7 +239,7 @@ jobs:
               keywords:
                 $seen: true
               from:
-              - email: "{{outputs.identity.email}}"
+              - email: "{{outputs.identity.identity_email}}"
               to:
               - email: "bob@{{vars.domain}}"
               subject: "{{vars.subject}}"
@@ -254,7 +254,7 @@ jobs:
         args:
           create:
             sub:
-              identityId: "{{outputs.identity.id}}"
+              identityId: "{{outputs.identity.identity_id}}"
               emailId: "#msg"
     test: |
       status == 0 &&
