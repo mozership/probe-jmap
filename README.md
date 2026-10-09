@@ -1,6 +1,6 @@
 # probe-jmap
 
-A [Probe](https://github.com/linyows/probe) action that calls [JMAP](https://jmap.io/) methods ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620), [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621)).
+A [Probe](https://github.com/mozership/probe) action that calls [JMAP](https://jmap.io/) methods ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620), [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621)).
 
 A step names the server and the method calls. The action fetches the session, fills in the account of each call, sends the calls in one request, and returns the responses by call id, with the method errors gathered in one list.
 
