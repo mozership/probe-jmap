@@ -1,0 +1,10 @@
+# probe-jmap built from this checkout, for e2e/workflow.yml. Probe resolves
+# an action before the first job starts, so the executable is built before
+# probe runs:
+#
+#   go build -o e2e/jmap/probe-jmap . && probe e2e/workflow.yml
+name: jmap
+description: Call JMAP methods
+runs:
+  using: binary
+  path: probe-jmap

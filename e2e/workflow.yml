@@ -1,0 +1,364 @@
+# The end-to-end tests: Stalwart started in a container, set up, and probe-jmap
+# run against it, all in this one workflow. Run it from the repository root,
+# with the action built first, as Probe resolves it before the first job:
+#
+#   go build -o e2e/jmap/probe-jmap . && probe e2e/workflow.yml
+#
+# E2E_HTTP_PORT is the port on this side, E2E_CONTAINER the container's name,
+# and E2E_KEEP=1 leaves the container running afterwards. The passwords are
+# generated for the run unless E2E_RECOVERY_PASSWORD, E2E_ALICE_PASSWORD and
+# E2E_BOB_PASSWORD give them.
+#
+# The server is set up with the http action, which probe-jmap is not, so a
+# mistake of probe-jmap cannot be hidden in the setup.
+name: probe-jmap against Stalwart
+
+vars:
+  # The release the tests are written against. Stalwart moves its settings
+  # between minor versions, so a new one is a change to make here on purpose.
+  image: stalwartlabs/stalwart:v0.16@sha256:ec011be228596e37e65f41aab17deed573859614430472f7eeb42178c50d87b7
+  container: "{{E2E_CONTAINER ?? 'probe-jmap-e2e'}}"
+  http_port: "{{E2E_HTTP_PORT ?? '18080'}}"
+  base: "http://localhost:{{vars.http_port}}"
+  keep: "{{E2E_KEEP ?? ''}}"
+  recovery_password: "{{E2E_RECOVERY_PASSWORD ?? random_str(24)}}"
+  domain: example.test
+  alice_password: "{{E2E_ALICE_PASSWORD ?? random_str(24)}}"
+  bob_password: "{{E2E_BOB_PASSWORD ?? random_str(24)}}"
+  # Marks what one run sends, so that runs against the same server do not
+  # find each other's mail.
+  subject: "probe-jmap e2e {{random_str(12)}}"
+
+secrets:
+  - E2E_RECOVERY_PASSWORD
+  - E2E_ALICE_PASSWORD
+  - E2E_BOB_PASSWORD
+
+jobs:
+- name: Start and provision the server
+  id: server
+  defaults:
+    http:
+      url: "{{vars.base}}"
+      headers:
+        content-type: application/json
+  steps:
+  # Before anything is started, so that whatever happens next, the container
+  # goes when the workflow ends: Probe stops a background command then, as it
+  # does when it is interrupted. E2E_KEEP=1 leaves it.
+  - name: Remove the container when the workflow ends
+    uses: shell
+    skipif: vars.keep == "1"
+    with:
+      cmd: "trap 'docker rm -f {{vars.container}} >/dev/null 2>&1; exit 0' TERM INT; while :; do sleep 1; done"
+      background: true
+    test: status == -1
+
+  # STALWART_PUBLIC_URL is what the session's URLs are built from. Without it
+  # they name the server's hostname, which nothing outside the container
+  # resolves.
+  - name: Start Stalwart
+    uses: shell
+    with:
+      cmd: >-
+        docker rm -f {{vars.container}} >/dev/null 2>&1;
+        docker run -d --name {{vars.container}}
+        -p {{vars.http_port}}:8080
+        -e STALWART_RECOVERY_ADMIN=admin:{{vars.recovery_password}}
+        -e STALWART_PUBLIC_URL={{vars.base}}
+        {{vars.image}}
+      timeout: 5m
+    test: res.code == 0
+
+  - name: Wait for bootstrap mode
+    uses: http
+    with:
+      get: /.well-known/jmap
+    retry: {max_attempts: 60, interval: 1s}
+    test: res.code == 200
+
+  # Certificates and DKIM keys are left out: nothing outside the container
+  # reaches it by name, and no mail leaves it.
+  - name: Complete bootstrap
+    id: boot
+    uses: http
+    with:
+      post: /jmap/
+      basic_auth:
+        username: admin
+        password: "{{vars.recovery_password}}"
+      body:
+        using: ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]
+        methodCalls:
+        - - x:Bootstrap/set
+          - update:
+              singleton:
+                serverHostname: "mail.{{vars.domain}}"
+                defaultDomain: "{{vars.domain}}"
+                requestTlsCertificate: false
+                generateDkimKeys: false
+          - boot
+    test: res.code == 200 && res.body.methodResponses[0][1].updated.singleton.secret != ""
+    outputs:
+      user: res.body.methodResponses[0][1].updated.singleton.username
+      secret: res.body.methodResponses[0][1].updated.singleton.secret
+
+  # Bootstrap writes the configuration and leaves the server as it was, in
+  # bootstrap mode, until it starts again.
+  - name: Restart out of bootstrap mode
+    uses: shell
+    with:
+      cmd: docker restart {{vars.container}}
+      timeout: 60s
+    test: res.code == 0
+
+  - name: Wait for the server
+    uses: http
+    with:
+      get: /.well-known/jmap
+      basic_auth: &admin
+        username: "{{outputs.boot.user}}"
+        password: "{{outputs.boot.secret}}"
+    retry: {max_attempts: 60, interval: 1s}
+    test: res.code == 200 && res.body.username == outputs.boot.user
+
+  - name: Find the domain bootstrap created
+    id: domain
+    uses: http
+    with:
+      post: /jmap/
+      basic_auth: *admin
+      body:
+        using: ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]
+        methodCalls:
+        - [x:Domain/query, {filter: {name: "{{vars.domain}}"}}, find]
+    test: res.code == 200 && len(res.body.methodResponses[0][1].ids) == 1
+    outputs:
+      id: res.body.methodResponses[0][1].ids[0]
+
+  # Stalwart's lists are written as maps keyed by position, which is why the
+  # one credential is under "0".
+  - name: Create alice and bob
+    uses: http
+    with:
+      post: /jmap/
+      basic_auth: *admin
+      body:
+        using: ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]
+        methodCalls:
+        - - x:Account/set
+          - create:
+              alice: &user
+                "@type": User
+                name: alice
+                domainId: "{{outputs.domain.id}}"
+                credentials: {"0": {"@type": Password, secret: "{{vars.alice_password}}"}}
+                roles: {"@type": User}
+                permissions: {"@type": Inherit}
+                quotas: {}
+                aliases: {}
+                memberGroupIds: {}
+                encryptionAtRest: {"@type": Disabled}
+              bob:
+                <<: *user
+                name: bob
+                credentials: {"0": {"@type": Password, secret: "{{vars.bob_password}}"}}
+          - accounts
+    test: res.code == 200 && len(res.body.methodResponses[0][1].created) == 2
+
+- name: Mail sent by alice, received by bob
+  id: mail
+  needs: [server]
+  defaults:
+    ./jmap:
+      url: "{{vars.base}}"
+      basic_auth:
+        username: "alice@{{vars.domain}}"
+        password: "{{vars.alice_password}}"
+  steps:
+  - name: Find alice's mailboxes and identities
+    id: alice
+    uses: ./jmap
+    with:
+      calls:
+      - method: Mailbox/get
+        id: mailboxes
+        args:
+          properties: [name, role]
+      - method: Identity/get
+        id: identities
+    test: |
+      status == 0 &&
+      res.req.url == vars.base + "/jmap/" &&
+      find(res.results.mailboxes.list, #.role == "sent") != nil
+    outputs:
+      sent: 'find(res.results.mailboxes.list, #.role == "sent").id'
+      identities: len(res.results.identities.list)
+    echo: |
+      Mailboxes: {{join(map(res.results.mailboxes.list, #.name + " (" + (#.role ?? "-") + ")"), ", ")}}
+      Identities: {{len(res.results.identities.list)}}
+
+  - name: Give alice an identity to send as
+    uses: ./jmap
+    skipif: outputs.alice.identities > 0
+    with:
+      calls:
+      - method: Identity/set
+        args:
+          create:
+            me:
+              name: Alice
+              email: "alice@{{vars.domain}}"
+    test: status == 0 && res.results.c0.created.me.id != nil
+
+  - name: Find the identity to send as
+    id: identity
+    uses: ./jmap
+    with:
+      calls:
+      - method: Identity/get
+        id: identities
+    test: status == 0 && len(res.results.identities.list) > 0
+    outputs:
+      id: res.results.identities.list[0].id
+      email: res.results.identities.list[0].email
+
+  # Email/set makes the message in the sent mailbox, and EmailSubmission/set
+  # sends it, naming the message by the creation id "#msg".
+  - name: Send a message to bob
+    uses: ./jmap
+    with:
+      calls:
+      - method: Email/set
+        id: create
+        args:
+          create:
+            msg:
+              mailboxIds:
+                "{{outputs.alice.sent}}": true
+              keywords:
+                $seen: true
+              from:
+              - email: "{{outputs.identity.email}}"
+              to:
+              - email: "bob@{{vars.domain}}"
+              subject: "{{vars.subject}}"
+              bodyValues:
+                body:
+                  value: Sent by probe-jmap.
+              textBody:
+              - partId: body
+                type: text/plain
+      - method: EmailSubmission/set
+        id: submit
+        args:
+          create:
+            sub:
+              identityId: "{{outputs.identity.id}}"
+              emailId: "#msg"
+    test: |
+      status == 0 &&
+      res.results.create.created.msg.id != nil &&
+      res.results.submit.created.sub.id != nil
+
+  # Email/query and Email/get in one request, the ids passed by a
+  # back-reference that names no method: probe-jmap fills in Email/query.
+  - name: Wait for the message in bob's inbox
+    uses: ./jmap
+    with:
+      basic_auth:
+        username: "bob@{{vars.domain}}"
+        password: "{{vars.bob_password}}"
+      calls:
+      - method: Mailbox/query
+        id: inbox
+        args:
+          filter: {role: inbox}
+      - method: Email/query
+        id: query
+        args:
+          filter:
+            subject: "{{vars.subject}}"
+      - method: Email/get
+        id: get
+        args:
+          "#ids": {resultOf: query, path: /ids}
+          properties: [subject, from, mailboxIds]
+    retry:
+      max_attempts: 30
+      interval: 1s
+    test: |
+      status == 0 &&
+      len(res.results.get.list) == 1 &&
+      res.results.get.list[0].subject == vars.subject &&
+      res.results.get.list[0].from[0].email == "alice@" + vars.domain &&
+      res.results.inbox.ids[0] in keys(res.results.get.list[0].mailboxIds)
+
+# After the mail job, as the wrong password at the end is a failed login,
+# which a server may answer by refusing the address for a while.
+- name: Failures the server reports
+  needs: [server, mail]
+  defaults:
+    ./jmap:
+      url: "{{vars.base}}"
+      basic_auth:
+        username: "alice@{{vars.domain}}"
+        password: "{{vars.alice_password}}"
+  steps:
+  - name: A method the server does not know
+    uses: ./jmap
+    with:
+      using: [urn:ietf:params:jmap:core]
+      calls:
+      - method: Nope/get
+        id: nope
+    test: |
+      status == 1 && res.code == 200 &&
+      len(res.errors) == 1 &&
+      res.errors[0].kind == "method" &&
+      res.errors[0].type == "unknownMethod" &&
+      res.errors[0].id == "nope" &&
+      res.errors[0].method == "Nope/get"
+
+  - name: A record /set cannot create
+    uses: ./jmap
+    with:
+      calls:
+      - method: Email/set
+        args:
+          create:
+            bad:
+              mailboxIds:
+                no-such-mailbox: true
+              subject: never stored
+    test: |
+      status == 1 &&
+      len(res.errors) == 1 &&
+      res.errors[0].kind == "notCreated" &&
+      res.errors[0].key == "bad" &&
+      res.errors[0].method == "Email/set"
+
+  - name: A capability the server does not have
+    uses: ./jmap
+    with:
+      using: [urn:ietf:params:jmap:core, "urn:example:nope"]
+      calls:
+      - method: Core/echo
+        args: {hello: true}
+    test: |
+      status == 1 && res.code == 400 &&
+      len(res.errors) == 1 &&
+      res.errors[0].kind == "request" &&
+      res.errors[0].type == "urn:ietf:params:jmap:error:unknownCapability"
+
+  - name: A password the server refuses
+    uses: ./jmap
+    with:
+      basic_auth:
+        username: "alice@{{vars.domain}}"
+        password: wrong
+      calls:
+      - method: Core/echo
+    test: |
+      status == 1 && res.code == 401 && res.session == nil &&
+      res.errors[0].kind == "session"

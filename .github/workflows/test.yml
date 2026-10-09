@@ -16,3 +16,22 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
+
+  # The tests above answer from stubs. This one runs the action through probe
+  # against Stalwart, a server none of it was written against.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: go.mod
+      # Probe resolves the action before the first job of the workflow, so it
+      # is built first.
+      - run: go build -o e2e/jmap/probe-jmap .
+      - name: Run the scenarios against Stalwart
+        uses: linyows/probe-action@58e59821ea0c348da201080736ddcdb2b3cd3313 # v1.2.1
+        with:
+          version: v1.20.0
+          path: e2e/workflow.yml
+          options: --report github-summary

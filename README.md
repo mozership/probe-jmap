@@ -116,6 +116,14 @@ Any response the server sends is a result, so a test can assert on a method erro
 
 Under `--read-only`, a step whose calls include a method other than `/get`, `/query`, `/changes`, `/queryChanges`, `/lookup` and `/echo` is refused before anything is sent. A host that `--allow-host` does not allow is refused, for the session, the API URL and any redirect. Probe runs an external action under a guard only when `--allow-action` names it.
 
+## Testing
+
+`go test ./...` runs against stub servers. `e2e/workflow.yml` starts Stalwart in Docker, sets it up, and runs the action through Probe against it:
+
+```sh
+go build -o e2e/jmap/probe-jmap . && probe e2e/workflow.yml
+```
+
 ## Releasing
 
 Pushing a `v*` tag builds the executables with GoReleaser and publishes them on the release. The workflow then commits an `action.yml` with their URLs and SHA-256 digests to `main`, and adds the commit to the release notes. That commit is the one to pin: Probe reads `action.yml` at the pinned commit and refuses an executable whose digest differs.
