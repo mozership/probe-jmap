@@ -1,0 +1,10 @@
+name: jmap
+description: Call JMAP methods
+runs:
+  using: binary
+  url: https://github.com/mozership/probe-jmap/releases/download/v0.1.0/probe-jmap_{os}_{arch}
+  checksums:
+    darwin_amd64: "d63c2eb3884ccbc5ed2187e16a8d91447f358955260f951c87eca09ec57903e2"
+    darwin_arm64: "f14c9dc864f03b34ba370174534a6919c32dda131f3dd7843bcb2eef3ad3bea7"
+    linux_amd64: "f2a45bb83059a360deb6390ec0ffdf1718dab3029be512870f40f35f0ee954fa"
+    linux_arm64: "401020f0b35e8a0e5fa1ffe62cda9dbf4ea6ecbe646d05fbcf6bc3c918cf0356"
