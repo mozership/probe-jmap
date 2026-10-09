@@ -38,6 +38,15 @@ var capabilities = map[string]string{
 	"ContactCard":      "urn:ietf:params:jmap:contacts",
 }
 
+// params are the keys the action takes in with. action.yml declares them,
+// for probe check to report a key the action does not take.
+var params = []string{"url", "calls", "using", "account_id", "basic_auth", "headers", "timeout"}
+
+// keeps are the kinds of guard the action keeps to, as action.yml declares
+// them: it refuses a method that may write, and a host the run does not
+// allow.
+var keeps = []string{actionrpc.KindReadOnly, actionrpc.KindAllowHost}
+
 // readMethods are the methods, after the data type, that only read. They
 // are what a read-only run sends.
 var readMethods = []string{"get", "query", "changes", "queryChanges", "lookup", "echo"}
@@ -95,6 +104,12 @@ type methodCall struct {
 
 func parseRequest(with map[string]any) (*request, error) {
 	r := &request{timeout: DefaultTimeout, headers: map[string]string{}}
+
+	for k := range with {
+		if !slices.Contains(params, k) {
+			return nil, fmt.Errorf("jmap action takes %s, not %s", strings.Join(params, ", "), k)
+		}
+	}
 
 	raw, _ := with["url"].(string)
 	if raw == "" {

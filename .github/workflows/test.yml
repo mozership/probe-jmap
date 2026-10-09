@@ -32,6 +32,6 @@ jobs:
       - name: Run the scenarios against Stalwart
         uses: linyows/probe-action@58e59821ea0c348da201080736ddcdb2b3cd3313 # v1.2.1
         with:
-          version: v1.20.0
+          version: v1.21.0
           path: e2e/workflow.yml
           options: --report github-summary
