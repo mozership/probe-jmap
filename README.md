@@ -4,7 +4,7 @@ A [Probe](https://github.com/mozership/probe) action that calls [JMAP](https://j
 
 A step names the server and the method calls. The action fetches the session, fills in the account of each call, sends the calls in one request, and returns the responses by call id, with the method errors gathered in one list.
 
-Probe downloads it the first time a workflow uses it. It needs Probe v1.20.0 or later.
+Probe downloads it the first time a workflow uses it. It needs Probe v1.21.0 or later, which reads the guard and the params it declares in `action.yml`.
 
 ```yaml
 name: Mail over JMAP
@@ -82,6 +82,8 @@ A back-reference, an argument whose name starts with `#`, may leave out `name`: 
 
 A method of any other type needs `using`. When `using` is given, it is sent as written.
 
+A key of `with` that is not one of the parameters above fails the step before anything is sent, and `probe check` reports it with its line.
+
 ## Result
 
 | Field | Type | Description |
@@ -114,7 +116,9 @@ Any response the server sends is a result, so a test can assert on a method erro
 
 ## Guard
 
-Under `--read-only`, a step whose calls include a method other than `/get`, `/query`, `/changes`, `/queryChanges`, `/lookup` and `/echo` is refused before anything is sent. A host that `--allow-host` does not allow is refused, for the session, the API URL and any redirect. Probe runs an external action under a guard only when `--allow-action` names it.
+The action keeps to the guard of the run, and its `action.yml` declares `guard: [read-only, allow-host]`, so Probe runs it under `--read-only` and `--allow-host` without `--allow-action`.
+
+Under `--read-only`, a step whose calls include a method other than `/get`, `/query`, `/changes`, `/queryChanges`, `/lookup` and `/echo` is refused before anything is sent. A host that `--allow-host` does not allow is refused, for the session, the API URL and any redirect.
 
 ## Testing
 

@@ -5,6 +5,8 @@
 #   go build -o e2e/jmap/probe-jmap . && probe e2e/workflow.yml
 name: jmap
 description: Call JMAP methods
+guard: [read-only, allow-host]
+params: [url, calls, using, account_id, basic_auth, headers, timeout]
 runs:
   using: binary
   path: probe-jmap

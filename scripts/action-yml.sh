@@ -12,6 +12,8 @@ repo=${GITHUB_REPOSITORY:-mozership/probe-jmap}
 cat <<YAML
 name: jmap
 description: Call JMAP methods
+guard: [read-only, allow-host]
+params: [url, calls, using, account_id, basic_auth, headers, timeout]
 runs:
   using: binary
   url: https://github.com/${repo}/releases/download/${tag}/probe-jmap_{os}_{arch}

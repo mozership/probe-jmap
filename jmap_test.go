@@ -1,11 +1,16 @@
 package main
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/linyows/probe/actionref"
 	"github.com/linyows/probe/actionrpc"
 )
 
@@ -151,5 +156,47 @@ func TestParseTimeout(t *testing.T) {
 	}
 	if _, err := parseTimeout(true); err == nil {
 		t.Error("parseTimeout(true) error = nil")
+	}
+}
+
+func TestParseRequestRefusesUnknownKey(t *testing.T) {
+	_, err := parseRequest(map[string]any{
+		"url":   "http://localhost",
+		"calls": []any{map[string]any{"method": "Core/echo"}},
+		"cals":  []any{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not cals") {
+		t.Errorf("parseRequest() error = %v, want one naming cals", err)
+	}
+}
+
+// TestManifestsDeclare checks that the action.yml a release writes, and the
+// one the e2e workflow uses, declare the params and the guard the action
+// has, so that probe check and the guard of a run take it as it is.
+func TestManifestsDeclare(t *testing.T) {
+	checksums := filepath.Join(t.TempDir(), "checksums.txt")
+	sum := strings.Repeat("a", 64)
+	if err := os.WriteFile(checksums, []byte(sum+"  probe-jmap_linux_amd64\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	released, err := exec.Command("sh", "scripts/action-yml.sh", "v0.0.0", checksums).Output()
+	if err != nil {
+		t.Fatalf("scripts/action-yml.sh: %v", err)
+	}
+	local, err := os.ReadFile("e2e/jmap/action.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{"scripts/action-yml.sh": released, "e2e/jmap/action.yml": local} {
+		m, err := actionref.ParseManifest(data)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !slices.Equal(m.Params, params) {
+			t.Errorf("%s declares params %v, want %v", name, m.Params, params)
+		}
+		if !slices.Equal(m.Guard, keeps) {
+			t.Errorf("%s declares guard %v, want %v", name, m.Guard, keeps)
+		}
 	}
 }

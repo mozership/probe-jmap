@@ -4,11 +4,12 @@ go 1.27.1
 
 require (
 	github.com/hashicorp/go-hclog v1.6.3
-	github.com/linyows/probe v1.20.0
+	github.com/linyows/probe v1.21.0
 )
 
 require (
 	github.com/fatih/color v1.19.0 // indirect
+	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/hashicorp/go-plugin v1.8.0 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
