@@ -338,6 +338,8 @@ jobs:
       res.errors[0].key == "bad" &&
       res.errors[0].method == "Email/set"
 
+  # RFC 8620 names this unknownCapability; Stalwart 0.16 answers notRequest.
+  # What the action is tested for is the problem details in res.errors.
   - name: A capability the server does not have
     uses: ./jmap
     with:
@@ -349,7 +351,7 @@ jobs:
       status == 1 && res.code == 400 &&
       len(res.errors) == 1 &&
       res.errors[0].kind == "request" &&
-      res.errors[0].type == "urn:ietf:params:jmap:error:unknownCapability"
+      res.errors[0].type startsWith "urn:ietf:params:jmap:error:"
 
   - name: A password the server refuses
     uses: ./jmap
