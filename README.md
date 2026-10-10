@@ -2,7 +2,7 @@
 
 A [Probe](https://github.com/mozership/probe) action that calls [JMAP](https://jmap.io/) methods ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620), [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621)).
 
-A step names the server and the method calls. The action fetches the session, fills in the account of each call, sends the calls in one request, and returns the responses by call id, with the method errors gathered in one list.
+A step names the server and the method calls. The action fetches the session, fills in the account of each call, sends the calls in one request, and returns the responses by call id, with the method errors gathered in one list. A step that names no calls fetches the session alone.
 
 Probe downloads it the first time a workflow uses it. It needs Probe v1.21.0 or later, which reads the guard and the params it declares in `action.yml`.
 
@@ -45,7 +45,7 @@ Probe only takes a full 40-character commit SHA. The notes of each [release](htt
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `url` | String | Yes | - | The server, `http` or `https`. A URL with no path is taken as the server, whose session is at `/.well-known/jmap`; a URL with a path is the session URL itself |
-| `calls` | Array | Yes | - | The method calls, sent in one request in this order |
+| `calls` | Array | No | - | The method calls, sent in one request in this order. A step without the key [fetches the session alone](#the-session-alone); a list that is empty is an error |
 | `using` | Array | No | inferred | The capabilities the request uses, sent as written. By default the core capability and those that define the methods in `calls` |
 | `using_also` | Array | No | - | Capabilities to add to the inferred ones, such as the one of a vendor. Not a key of JMAP, and not given together with `using` |
 | `account_id` | String | No | primary account | The account of each call whose `args` give no `accountId` |
@@ -102,6 +102,21 @@ A step cannot give both. When the `defaults` of a job give `using_also`, a step 
 
 A key of `with` that is not one of the parameters above fails the step before anything is sent, and `probe check` reports it with its line.
 
+### The session alone
+
+A step without `calls` fetches the session and sends nothing to the API. It is how to wait for a server, or to test what the session says:
+
+```yaml
+- name: Wait for the server
+  uses: github.com/mozership/probe-jmap@<commit SHA>
+  retry: {max_attempts: 60, interval: 1s}
+  test: status == 0 && res.session.capabilities["urn:ietf:params:jmap:mail"] != nil
+```
+
+`res` is then the response to the session request, `res.results` and `res.responses` are empty, and `status` is `0` when the server gave a session. `using`, `using_also` and `account_id` are for the calls, and such a step does not read them, so the `defaults` of a job may give them.
+
+Only the key left out does this. `calls` with an empty list or no value fails the step, as a list that lost its calls would otherwise pass for a step that asks for none.
+
 ## Result
 
 | Field | Type | Description |
@@ -115,9 +130,9 @@ A key of `with` that is not one of the parameters above fails the step before an
 | `res.errors` | Array | What failed, described below; empty when nothing did |
 | `res.body` | Any | The whole response body, parsed when it is JSON, otherwise the raw string |
 | `res.rawbody` | String | The unparsed body, present when the body is JSON |
-| `req` | Object | The `session_url`, the API `url`, `using`, the `calls` as sent and the `headers` |
+| `req` | Object | The `session_url`, the API `url`, `using`, the `calls` as sent and the `headers`. In a step without `calls`, `url` is `""` and `using` and `calls` are empty |
 | `rt` | Duration | Time for the session and the API request together |
-| `status` | Integer | `0` when the API answered 2xx with method responses and `res.errors` is empty; `1` otherwise |
+| `status` | Integer | `0` when the API answered 2xx with method responses and `res.errors` is empty, or, in a step without `calls`, when the server gave a session; `1` otherwise |
 
 A JMAP server answers a method it could not run with HTTP 200, so `res.code` alone does not tell that the calls succeeded. `res.errors` gathers every failure, each the error object the server sent with these fields added:
 
@@ -128,7 +143,7 @@ A JMAP server answers a method it could not run with HTTP 200, so `res.code` alo
 | `request` | The whole request, answered with a problem details object | - |
 | `session` | The session, which the server did not give | `description` |
 
-When the server gives no session, the method calls are not sent, and `res` is the response to the session request.
+When the server gives no session, the method calls are not sent, and `res` is the response to the session request, as it is in a step without `calls`.
 
 Any response the server sends is a result, so a test can assert on a method error or a 401. Only a request that gets no response, such as a refused connection or a timeout, fails the step as an error.
 
