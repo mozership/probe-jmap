@@ -52,7 +52,7 @@ var accountless = []string{"Core", "PushSubscription"}
 
 // params are the keys the action takes in with. action.yml declares them,
 // for probe check to report a key the action does not take.
-var params = []string{"url", "calls", "using", "account_id", "basic_auth", "headers", "timeout"}
+var params = []string{"url", "calls", "using", "using_also", "account_id", "basic_auth", "headers", "timeout"}
 
 // keeps are the kinds of guard the action keeps to, as action.yml declares
 // them: it refuses a method that may write, and a host the run does not
@@ -142,11 +142,22 @@ func parseRequest(with map[string]any) (*request, error) {
 		return nil, err
 	}
 
+	// with.using is the whole of what is sent; with.using_also is added to
+	// what the calls are inferred to use.
+	var also []string
+	if v, ok := with["using_also"]; ok && v != nil {
+		if also, err = stringList(v, "with.using_also"); err != nil {
+			return nil, err
+		}
+	}
 	if v, ok := with["using"]; ok && v != nil {
+		if also != nil {
+			return nil, errors.New("with.using and with.using_also cannot be given together: using is sent as written, and using_also is added to what is inferred")
+		}
 		if r.using, err = stringList(v, "with.using"); err != nil {
 			return nil, err
 		}
-	} else if r.using, err = inferUsing(r.calls); err != nil {
+	} else if r.using, err = inferUsing(r.calls, also); err != nil {
 		return nil, err
 	}
 
@@ -260,14 +271,24 @@ func nameBackReferences(args map[string]any, methods map[string]string) {
 }
 
 // inferUsing returns the capabilities the methods of calls belong to, after
-// the core capability.
-func inferUsing(calls []methodCall) ([]string, error) {
+// the core capability, and then those of also that are not among them. A
+// method of a type that is not known is taken to belong to one of also, and
+// needs with.using when there is none.
+func inferUsing(calls []methodCall, also []string) ([]string, error) {
 	using := []string{coreCapability}
 	for _, c := range calls {
 		capability, ok := capabilityOf(c.method)
 		if !ok {
-			return nil, fmt.Errorf("with.using is needed for %s, as probe-jmap does not know which capability defines it", c.method)
+			if len(also) > 0 {
+				continue
+			}
+			return nil, fmt.Errorf("with.using or with.using_also is needed for %s, as probe-jmap does not know which capability defines it", c.method)
 		}
+		if !slices.Contains(using, capability) {
+			using = append(using, capability)
+		}
+	}
+	for _, capability := range also {
 		if !slices.Contains(using, capability) {
 			using = append(using, capability)
 		}

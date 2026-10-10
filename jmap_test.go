@@ -106,10 +106,46 @@ func TestInferUsingCoreMethods(t *testing.T) {
 		{"Blob/get", []string{coreCapability, "urn:ietf:params:jmap:blob"}},
 	}
 	for _, tt := range tests {
-		got, err := inferUsing([]methodCall{{method: tt.method}})
+		got, err := inferUsing([]methodCall{{method: tt.method}}, nil)
 		if err != nil || !reflect.DeepEqual(got, tt.want) {
 			t.Errorf("inferUsing(%s) = %v, %v, want %v", tt.method, got, err, tt.want)
 		}
+	}
+}
+
+// using_also is added to what is inferred, and stands for the types that are
+// not known.
+func TestParseRequestUsingAlso(t *testing.T) {
+	tests := []struct {
+		name string
+		with map[string]any
+		want []string
+	}{
+		{"added after the inferred", map[string]any{
+			"using_also": []any{"urn:example:vendor"},
+			"calls":      []any{map[string]any{"method": "Mailbox/get"}, map[string]any{"method": "x:Domain/query"}},
+		}, []string{coreCapability, "urn:ietf:params:jmap:mail", "urn:example:vendor"}},
+		{"not twice", map[string]any{
+			"using_also": []any{"urn:ietf:params:jmap:mail", coreCapability, "urn:example:vendor", "urn:example:vendor"},
+			"calls":      []any{map[string]any{"method": "Mailbox/get"}},
+		}, []string{coreCapability, "urn:ietf:params:jmap:mail", "urn:example:vendor"}},
+		{"null is not given", map[string]any{
+			"using_also": nil,
+			"using":      []any{"urn:example:vendor"},
+			"calls":      []any{map[string]any{"method": "x:Domain/query"}},
+		}, []string{"urn:example:vendor"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.with["url"] = "http://localhost"
+			r, err := parseRequest(tt.with)
+			if err != nil {
+				t.Fatalf("parseRequest() error = %v", err)
+			}
+			if !reflect.DeepEqual(r.using, tt.want) {
+				t.Errorf("using = %v, want %v", r.using, tt.want)
+			}
+		})
 	}
 }
 
@@ -133,7 +169,10 @@ func TestParseRequestErrors(t *testing.T) {
 			map[string]any{"method": "Core/echo", "id": "a"},
 			map[string]any{"method": "Core/echo", "id": "a"},
 		}}, "id of an earlier call"},
-		{"unknown capability", map[string]any{"url": "http://x", "calls": []any{map[string]any{"method": "Calendar/get"}}}, "with.using is needed for Calendar/get"},
+		{"unknown capability", map[string]any{"url": "http://x", "calls": []any{map[string]any{"method": "Calendar/get"}}}, "with.using or with.using_also is needed for Calendar/get"},
+		{"empty using_also", map[string]any{"url": "http://x", "using_also": []any{}, "calls": []any{map[string]any{"method": "Calendar/get"}}}, "is needed for Calendar/get"},
+		{"using_also not list", map[string]any{"url": "http://x", "calls": echo, "using_also": "urn:x"}, "with.using_also must be a list"},
+		{"using and using_also", map[string]any{"url": "http://x", "calls": echo, "using": []any{coreCapability}, "using_also": []any{"urn:x"}}, "cannot be given together"},
 		{"using not list", map[string]any{"url": "http://x", "calls": echo, "using": "urn:x"}, "with.using must be a list"},
 		{"auth and header", map[string]any{"url": "http://x", "calls": echo,
 			"basic_auth": map[string]any{"username": "a", "password": "b"},

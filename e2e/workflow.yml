@@ -307,6 +307,29 @@ jobs:
       res.results.get.list[0].from[0].email == "alice@" + vars.domain &&
       res.results.inbox.ids[0] in keys(res.results.get.list[0].mailboxIds)
 
+  # A standard type and one of Stalwart in one request: using_also adds the
+  # capability of Stalwart to what Core/echo is inferred to use.
+  - name: Find the domain with a type of the vendor
+    uses: ./jmap
+    with:
+      basic_auth:
+        username: "{{outputs.boot.user}}"
+        password: "{{outputs.boot.secret}}"
+      using_also: ["urn:stalwart:jmap"]
+      calls:
+      - method: Core/echo
+        id: echo
+        args: {hello: true}
+      - method: x:Domain/query
+        id: domain
+        args:
+          filter: {name: "{{vars.domain}}"}
+    test: |
+      status == 0 &&
+      req.using == ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"] &&
+      res.results.echo.hello == true &&
+      res.results.domain.ids == [outputs.domain.id]
+
 # After the mail job, as the wrong password at the end is a failed login,
 # which a server may answer by refusing the address for a while.
 - name: Failures the server reports

@@ -188,6 +188,35 @@ func TestRunGivesAccountlessMethodsNoAccount(t *testing.T) {
 	}
 }
 
+// A method of a type using_also stands for is sent, in no account.
+func TestRunUsingAlso(t *testing.T) {
+	s := newJMAPServer(t, echo)
+
+	ret, err := (&Action{}).Run(map[string]any{
+		"url":        s.URL,
+		"using_also": []any{"urn:example:vendor"},
+		"calls": []any{
+			map[string]any{"method": "Mailbox/get"},
+			map[string]any{"method": "x:Domain/query"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	post := s.posts[0]
+	want := []any{coreCapability, "urn:ietf:params:jmap:mail", "urn:example:vendor"}
+	if !reflect.DeepEqual(post["using"], want) {
+		t.Errorf("using = %v, want %v", post["using"], want)
+	}
+	if got := ret["req"].(map[string]any)["using"]; !reflect.DeepEqual(got, []string{coreCapability, "urn:ietf:params:jmap:mail", "urn:example:vendor"}) {
+		t.Errorf("req.using = %v", got)
+	}
+	calls := post["methodCalls"].([]any)
+	if id, ok := calls[1].([]any)[1].(map[string]any)["accountId"]; ok {
+		t.Errorf("x:Domain/query is made in account %v, want none", id)
+	}
+}
+
 // The session is found by a redirect from the well-known URI, as many
 // servers answer it with one.
 func TestRunFollowsRedirectToSession(t *testing.T) {
