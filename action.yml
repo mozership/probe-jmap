@@ -1,12 +1,12 @@
 name: jmap
 description: Call JMAP methods
 guard: [read-only, allow-host]
-params: [url, calls, using, account_id, basic_auth, headers, timeout]
+params: [url, calls, using, using_also, account_id, keep_session, basic_auth, headers, timeout]
 runs:
   using: binary
-  url: https://github.com/mozership/probe-jmap/releases/download/v0.2.0/probe-jmap_{os}_{arch}
+  url: https://github.com/mozership/probe-jmap/releases/download/v0.3.0/probe-jmap_{os}_{arch}
   checksums:
-    darwin_amd64: "ea281626e19218491eb6d85fc7c8e7ac9bfe34bdae03346a8d0a3faae411c626"
-    darwin_arm64: "133b04d642bc93df714695c4340a5e020112dbb4075df6773da98ec11b5e4025"
-    linux_amd64: "13f4601089a8fc8f79cf5941369e7509d3a6c6bbe9dc07483f18d4b8a67c1a73"
-    linux_arm64: "748f14e068b52048e02b79614d7007e3102708e9b0f3b5b582ebe30e0a941c59"
+    darwin_amd64: "65210d7ec26ae0e5ad5942bb21af891e127192f572a98b836979354679fd6a7c"
+    darwin_arm64: "00fcbc7e4ecf7388d456d39a02bf44a9bd0388faa86a4d64522c500931832b5c"
+    linux_amd64: "c94bb003d3ccb8e6bd22954dc02f3feb89424aabfa24af28afd07d34773b934f"
+    linux_arm64: "4360d00f77c12dd72920700354dc6235e7f92fa904c6b063ff2d3134d40fb331"
