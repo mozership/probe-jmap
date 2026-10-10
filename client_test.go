@@ -154,6 +154,40 @@ func TestRun(t *testing.T) {
 	}
 }
 
+// A push subscription is tied to no account, so its methods are given no
+// accountId, not even the one with.account_id names.
+func TestRunGivesAccountlessMethodsNoAccount(t *testing.T) {
+	s := newJMAPServer(t, echo)
+
+	ret, err := (&Action{}).Run(map[string]any{
+		"url":        s.URL,
+		"account_id": "a1",
+		"calls": []any{
+			map[string]any{"method": "PushSubscription/get"},
+			map[string]any{"method": "Core/echo"},
+			map[string]any{"method": "Email/get"},
+			map[string]any{"method": "Blob/copy"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if ret["status"] != 0 {
+		t.Errorf("status = %v, want 0", ret["status"])
+	}
+	post := s.posts[0]
+	if want := []any{coreCapability, "urn:ietf:params:jmap:mail"}; !reflect.DeepEqual(post["using"], want) {
+		t.Errorf("using = %v, want %v", post["using"], want)
+	}
+	accounts := []any{}
+	for _, c := range post["methodCalls"].([]any) {
+		accounts = append(accounts, c.([]any)[1].(map[string]any)["accountId"])
+	}
+	if want := []any{nil, nil, "a1", "a1"}; !reflect.DeepEqual(accounts, want) {
+		t.Errorf("accountIds = %v, want %v", accounts, want)
+	}
+}
+
 // The session is found by a redirect from the well-known URI, as many
 // servers answer it with one.
 func TestRunFollowsRedirectToSession(t *testing.T) {

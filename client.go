@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -188,9 +189,10 @@ func readSession(res *response) (map[string]any, string, error) {
 
 // accountFor returns the account a call of method is made in when its args
 // name none: with.account_id, or else the primary account of the
-// capability that defines method. Core/echo is made in no account.
+// capability that defines method. A method of an accountless type is made
+// in no account.
 func (r *request) accountFor(method string, session map[string]any) string {
-	if method == "Core/echo" {
+	if typ, _, _ := strings.Cut(method, "/"); slices.Contains(accountless, typ) {
 		return ""
 	}
 	if r.accountID != "" {

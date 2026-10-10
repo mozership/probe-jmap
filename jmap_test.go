@@ -93,6 +93,26 @@ func TestParseRequestKeepsGivenUsingAndName(t *testing.T) {
 	}
 }
 
+// PushSubscription and Blob/copy are of RFC 8620, so they need no more than
+// the core capability, unlike the rest of Blob.
+func TestInferUsingCoreMethods(t *testing.T) {
+	tests := []struct {
+		method string
+		want   []string
+	}{
+		{"PushSubscription/get", []string{coreCapability}},
+		{"PushSubscription/set", []string{coreCapability}},
+		{"Blob/copy", []string{coreCapability}},
+		{"Blob/get", []string{coreCapability, "urn:ietf:params:jmap:blob"}},
+	}
+	for _, tt := range tests {
+		got, err := inferUsing([]methodCall{{method: tt.method}})
+		if err != nil || !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("inferUsing(%s) = %v, %v, want %v", tt.method, got, err, tt.want)
+		}
+	}
+}
+
 func TestParseRequestErrors(t *testing.T) {
 	echo := []any{map[string]any{"method": "Core/echo"}}
 	tests := []struct {

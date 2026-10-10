@@ -60,7 +60,7 @@ A call in `calls` takes:
 | `args` | No | The arguments of the method |
 | `id` | No | The call id, which a back-reference and `res.results` use. Defaults to `c` and the position of the call, from `c0` |
 
-A call whose `args` give neither `accountId` nor `#accountId` is made in `account_id`, or else in the primary account the session names for the capability of the method. `Core/echo` is made in no account.
+A call whose `args` give neither `accountId` nor `#accountId` is made in `account_id`, or else in the primary account the session names for the capability of the method. `Core/echo` and the methods of `PushSubscription` take no `accountId`, and are given none.
 
 A back-reference, an argument whose name starts with `#`, may leave out `name`: it is given the method of the call that `resultOf` names.
 
@@ -70,7 +70,7 @@ A back-reference, an argument whose name starts with `#`, may leave out `name`: 
 
 | Type | Capability |
 |---|---|
-| `Core` | `urn:ietf:params:jmap:core` |
+| `Core`, `PushSubscription` | `urn:ietf:params:jmap:core` |
 | `Mailbox`, `Thread`, `Email`, `SearchSnippet` | `urn:ietf:params:jmap:mail` |
 | `Identity`, `EmailSubmission` | `urn:ietf:params:jmap:submission` |
 | `VacationResponse` | `urn:ietf:params:jmap:vacationresponse` |
@@ -79,6 +79,8 @@ A back-reference, an argument whose name starts with `#`, may leave out `name`: 
 | `Quota` | `urn:ietf:params:jmap:quota` |
 | `SieveScript` | `urn:ietf:params:jmap:sieve` |
 | `AddressBook`, `ContactCard` | `urn:ietf:params:jmap:contacts` |
+
+`Blob/copy` is the exception: RFC 8620 defines it, so it is inferred as the core capability, and it is made in the primary account of that capability when the session names one.
 
 A method of any other type needs `using`. When `using` is given, it is sent as written.
 
