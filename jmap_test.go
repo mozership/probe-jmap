@@ -2,8 +2,6 @@ package main
 
 import (
 	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -251,24 +249,16 @@ func TestParseRequestRefusesUnknownKey(t *testing.T) {
 	}
 }
 
-// TestManifestsDeclare checks that the action.yml a release writes, and the
-// one the e2e workflow uses, declare the params and the guard the action
-// has, so that probe check and the guard of a run take it as it is.
+// TestManifestsDeclare checks that action.yml, and the one the e2e workflow
+// uses, declare the params and the guard the action has, so that probe
+// check and the guard of a run take it as it is. probe manifest keeps what
+// action.yml declares in the one of a release.
 func TestManifestsDeclare(t *testing.T) {
-	checksums := filepath.Join(t.TempDir(), "checksums.txt")
-	sum := strings.Repeat("a", 64)
-	if err := os.WriteFile(checksums, []byte(sum+"  probe-jmap_linux_amd64\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	released, err := exec.Command("sh", "scripts/action-yml.sh", "v0.0.0", checksums).Output()
-	if err != nil {
-		t.Fatalf("scripts/action-yml.sh: %v", err)
-	}
-	local, err := os.ReadFile("e2e/jmap/action.yml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, data := range map[string][]byte{"scripts/action-yml.sh": released, "e2e/jmap/action.yml": local} {
+	for _, name := range []string{"action.yml", "e2e/jmap/action.yml"} {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
 		m, err := actionref.ParseManifest(data)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
