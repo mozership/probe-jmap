@@ -52,7 +52,7 @@ var accountless = []string{"Core", "PushSubscription"}
 
 // params are the keys the action takes in with. action.yml declares them,
 // for probe check to report a key the action does not take.
-var params = []string{"url", "calls", "using", "using_also", "account_id", "basic_auth", "headers", "timeout"}
+var params = []string{"url", "calls", "using", "using_also", "account_id", "keep_session", "basic_auth", "headers", "timeout"}
 
 // keeps are the kinds of guard the action keeps to, as action.yml declares
 // them: it refuses a method that may write, and a host the run does not
@@ -78,7 +78,8 @@ func (a *Action) Run(with map[string]any) (map[string]any, error) {
 
 // RunStep calls the methods in call.With: it fetches the session, then
 // sends the method calls to the API URL the session names. A step without
-// calls stops at the session. A response the
+// calls stops at the session, and one that asks for keep_session uses the
+// session the job keeps, returning the state to keep. A response the
 // server sends is a result, whatever its status code or method errors; only
 // a request that gets no response, or one the guard refuses, is an error.
 func (a *Action) RunStep(call actionrpc.Call) (map[string]any, map[string]any, error) {
@@ -94,9 +95,9 @@ func (a *Action) RunStep(call actionrpc.Call) (map[string]any, map[string]any, e
 	if err := checkReadOnly(call.Guard, req.calls); err != nil {
 		return nil, nil, err
 	}
-	ret, err := a.do(req, call.Guard)
+	ret, state, err := a.do(req, call.Guard, call.State)
 	actionrpc.LogOutcome(a.log, "jmap request", ret, err)
-	return ret, nil, err
+	return ret, state, err
 }
 
 type request struct {
@@ -105,8 +106,11 @@ type request struct {
 	using      []string
 	calls      []methodCall
 	accountID  string
-	headers    map[string]string
-	timeout    time.Duration
+	// keepSession has the step use the session the job keeps, and keep the
+	// one it fetches.
+	keepSession bool
+	headers     map[string]string
+	timeout     time.Duration
 }
 
 type methodCall struct {
@@ -184,10 +188,16 @@ func parseRequest(with map[string]any) (*request, error) {
 	return r, nil
 }
 
-// parseTransport reads what the session request and the API request share:
-// with.headers, with.basic_auth and with.timeout.
+// parseTransport reads what a step takes with or without calls:
+// with.keep_session, with.headers, with.basic_auth and with.timeout.
 func (r *request) parseTransport(with map[string]any) error {
 	var err error
+	if v, ok := with["keep_session"]; ok && v != nil {
+		if r.keepSession, ok = v.(bool); !ok {
+			return fmt.Errorf("with.keep_session must be true or false, not %v", v)
+		}
+	}
+
 	if v, ok := with["headers"]; ok && v != nil {
 		headers, ok := v.(map[string]any)
 		if !ok {
