@@ -14,12 +14,19 @@ const stateSessionsKey = "sessions"
 // sessionKey names the session r asks for among those a job keeps: the
 // session URL and the headers it is asked with, so that the session of one
 // user is not used for another. It is a digest, as the headers hold the
-// credentials.
+// credentials. The case of a header name does not tell sessions apart.
 func (r *request) sessionKey() string {
+	// The names are put in one case before they are put in order, as the
+	// same headers written in another case ask for the same session.
+	lines := make([]string, 0, len(r.headers))
+	for k, v := range r.headers {
+		lines = append(lines, strings.ToLower(k)+": "+v)
+	}
+	slices.Sort(lines)
 	h := sha256.New()
 	h.Write([]byte(r.sessionURL))
-	for _, k := range slices.Sorted(maps.Keys(r.headers)) {
-		h.Write([]byte("\n" + strings.ToLower(k) + ": " + r.headers[k]))
+	for _, line := range lines {
+		h.Write([]byte("\n" + line))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

@@ -176,3 +176,17 @@ func TestKeepSessionMustBeBoolean(t *testing.T) {
 		t.Error("parseRequest() error = nil for keep_session that is not true or false")
 	}
 }
+
+// Header names are the same in any case, so the headers of one request
+// written in another case ask for the session already kept.
+func TestSessionKeyIgnoresTheCaseOfHeaderNames(t *testing.T) {
+	a := &request{sessionURL: "http://x/", headers: map[string]string{"X-A": "1", "x-b": "2"}}
+	b := &request{sessionURL: "http://x/", headers: map[string]string{"x-a": "1", "X-B": "2"}}
+	if a.sessionKey() != b.sessionKey() {
+		t.Error("the same headers in another case are given another key")
+	}
+	c := &request{sessionURL: "http://x/", headers: map[string]string{"x-a": "1", "X-B": "3"}}
+	if a.sessionKey() == c.sessionKey() {
+		t.Error("headers of another value are given the same key")
+	}
+}
