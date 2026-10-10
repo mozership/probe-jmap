@@ -320,6 +320,65 @@ func TestRunFailedResponses(t *testing.T) {
 	}
 }
 
+// A step without calls stops at the session: the API gets nothing, and the
+// result is the response to the session request.
+func TestRunSessionAlone(t *testing.T) {
+	s := newJMAPServer(t, echo)
+
+	ret, _, err := (&Action{}).RunStep(actionrpc.Call{
+		With: map[string]any{
+			"url":        s.URL,
+			"basic_auth": map[string]any{"username": "alice", "password": "secret"},
+		},
+		Guard: actionrpc.Guard{ReadOnly: true},
+	})
+	if err != nil {
+		t.Fatalf("RunStep() error = %v", err)
+	}
+	if len(s.sessions) != 1 || len(s.posts) != 0 {
+		t.Fatalf("got %d session and %d API requests, want 1 and 0", len(s.sessions), len(s.posts))
+	}
+	if got := s.sessions[0].Header.Get("Authorization"); got != "Basic YWxpY2U6c2VjcmV0" {
+		t.Errorf("Authorization = %q", got)
+	}
+	if ret["status"] != 0 {
+		t.Errorf("status = %v, want 0", ret["status"])
+	}
+	req := ret["req"].(map[string]any)
+	if req["url"] != "" || req["session_url"] != s.URL+"/.well-known/jmap" ||
+		len(req["using"].([]string)) != 0 || len(req["calls"].([]any)) != 0 {
+		t.Errorf("req = %v", req)
+	}
+	res := ret["res"].(map[string]any)
+	if res["code"] != 200 || res["session"].(map[string]any)["apiUrl"] != "/api/" ||
+		res["body"].(map[string]any)["apiUrl"] != "/api/" {
+		t.Errorf("res = %v", res)
+	}
+	if len(res["responses"].([]any)) != 0 || len(res["results"].(map[string]any)) != 0 || len(res["errors"].([]any)) != 0 {
+		t.Errorf("res.responses = %v, res.results = %v, res.errors = %v, want none", res["responses"], res["results"], res["errors"])
+	}
+	if _, err := actionrpc.Sendable(ret); err != nil {
+		t.Errorf("result cannot be sent to probe: %v", err)
+	}
+}
+
+// A session the server does not give fails a step without calls as it does
+// one with them.
+func TestRunSessionAloneWithoutSession(t *testing.T) {
+	s := newJMAPServer(t, echo)
+	s.sessionCode = http.StatusUnauthorized
+
+	ret, err := (&Action{}).Run(map[string]any{"url": s.URL})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	res := ret["res"].(map[string]any)
+	errs := res["errors"].([]any)
+	if ret["status"] != 1 || res["code"] != 401 || res["session"] != nil || len(errs) != 1 || errs[0].(map[string]any)["kind"] != "session" {
+		t.Errorf("status = %v, res = %v", ret["status"], res)
+	}
+}
+
 // A session the server does not give is a result, and the methods are not
 // sent.
 func TestRunWithoutSession(t *testing.T) {

@@ -77,7 +77,8 @@ func (a *Action) Run(with map[string]any) (map[string]any, error) {
 }
 
 // RunStep calls the methods in call.With: it fetches the session, then
-// sends the method calls to the API URL the session names. A response the
+// sends the method calls to the API URL the session names. A step without
+// calls stops at the session. A response the
 // server sends is a result, whatever its status code or method errors; only
 // a request that gets no response, or one the guard refuses, is an error.
 func (a *Action) RunStep(call actionrpc.Call) (map[string]any, map[string]any, error) {
@@ -138,7 +139,17 @@ func parseRequest(with map[string]any) (*request, error) {
 	}
 	r.sessionURL = u.String()
 
-	if r.calls, err = parseCalls(with["calls"]); err != nil {
+	// A step without with.calls fetches the session alone. What only the
+	// calls use is left unread, as the defaults of a job may give it to a
+	// step that makes none.
+	calls, hasCalls := with["calls"]
+	if !hasCalls {
+		if err := r.parseTransport(with); err != nil {
+			return nil, err
+		}
+		return r, nil
+	}
+	if r.calls, err = parseCalls(calls); err != nil {
 		return nil, err
 	}
 
@@ -167,10 +178,20 @@ func parseRequest(with map[string]any) (*request, error) {
 		}
 	}
 
+	if err := r.parseTransport(with); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// parseTransport reads what the session request and the API request share:
+// with.headers, with.basic_auth and with.timeout.
+func (r *request) parseTransport(with map[string]any) error {
+	var err error
 	if v, ok := with["headers"]; ok && v != nil {
 		headers, ok := v.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("with.headers must be an object, not %T", v)
+			return fmt.Errorf("with.headers must be an object, not %T", v)
 		}
 		for k, v := range headers {
 			r.headers[k] = fmt.Sprint(v)
@@ -180,11 +201,11 @@ func parseRequest(with map[string]any) (*request, error) {
 	if v, ok := with["basic_auth"]; ok {
 		auth, err := basicAuth(v)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for k := range r.headers {
 			if strings.EqualFold(k, "Authorization") {
-				return nil, errors.New("with.basic_auth and an Authorization header cannot be given together")
+				return errors.New("with.basic_auth and an Authorization header cannot be given together")
 			}
 		}
 		r.headers["Authorization"] = auth
@@ -192,20 +213,22 @@ func parseRequest(with map[string]any) (*request, error) {
 
 	if v, ok := with["timeout"]; ok {
 		if r.timeout, err = parseTimeout(v); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	return r, nil
+	return nil
 }
 
-// parseCalls reads with.calls, a list of method calls. A call without an id
+// parseCalls reads with.calls, a list of method calls that is not empty. A
+// step leaves the key out to make none; a list that is empty or null is
+// more likely one that lost its calls. A call without an id
 // is given "c" and its position, from 0. A back-reference without a name is
 // given the method of the call it refers to.
 func parseCalls(v any) ([]methodCall, error) {
 	list, ok := v.([]any)
 	if !ok || len(list) == 0 {
-		return nil, errors.New("jmap action requires with.calls, a list of method calls")
+		return nil, errors.New("with.calls must be a list of method calls that is not empty; a step that fetches the session alone leaves calls out")
 	}
 	calls := make([]methodCall, 0, len(list))
 	methods := map[string]string{}

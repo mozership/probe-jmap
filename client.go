@@ -66,6 +66,11 @@ func (a *Action) do(r *request, guard actionrpc.Guard) (map[string]any, error) {
 		}}, time.Since(start)), nil
 	}
 
+	if len(r.calls) == 0 {
+		// The step asks for the session alone, and this is it.
+		return result(r, session, "", nil, sessionReq, sessionRes, nil, time.Since(start)), nil
+	}
+
 	methodCalls := make([]any, 0, len(r.calls))
 	for _, c := range r.calls {
 		args := maps.Clone(c.args)
@@ -214,8 +219,9 @@ func hasArg(args map[string]any, name string) bool {
 	return value || ref
 }
 
-// result is what the step gets: the request last sent and its response.
-// errs holds the errors found before the method responses, if any.
+// result is what the step gets: the request last sent and its response,
+// which is that of the session when the step has no calls or got no
+// session. errs holds the errors found before the method responses, if any.
 func result(r *request, session map[string]any, apiURL string, methodCalls []any, req *http.Request, res *response, errs []any, rt time.Duration) map[string]any {
 	responses := []any{}
 	results := map[string]any{}
@@ -232,7 +238,7 @@ func result(r *request, session map[string]any, apiURL string, methodCalls []any
 	if !isObj {
 		ok = false
 	}
-	if session != nil {
+	if session != nil && len(r.calls) > 0 {
 		if !ok && isObj {
 			// A request the server refused as a whole is answered with a
 			// problem details object, as RFC 8620 section 3.6.1 sets.
@@ -299,14 +305,23 @@ func result(r *request, session map[string]any, apiURL string, methodCalls []any
 		"req": map[string]any{
 			"session_url": r.sessionURL,
 			"url":         apiURL,
-			"using":       r.using,
-			"calls":       methodCalls,
+			"using":       sent(r.using),
+			"calls":       sent(methodCalls),
 			"headers":     flattenHeaders(req.Header),
 		},
 		"res":    resMap,
 		"rt":     rt.String(),
 		"status": status,
 	}
+}
+
+// sent returns list, or an empty list in place of none, for a step without
+// calls to read as one that sent nothing.
+func sent[T any](list []T) []T {
+	if list == nil {
+		return []T{}
+	}
+	return list
 }
 
 // withFields returns a copy of m with fields added.

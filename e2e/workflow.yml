@@ -176,6 +176,16 @@ jobs:
         username: "alice@{{vars.domain}}"
         password: "{{vars.alice_password}}"
   steps:
+  # A step without calls stops at the session, and sends nothing to the API.
+  - name: Read alice's session
+    uses: ./jmap
+    test: |
+      status == 0 && res.code == 200 &&
+      req.url == "" && len(req.calls) == 0 && len(res.responses) == 0 &&
+      res.session.username == "alice@" + vars.domain &&
+      res.session.capabilities["urn:ietf:params:jmap:mail"] != nil &&
+      res.session.apiUrl == vars.base + "/jmap/"
+
   - name: Find alice's mailboxes and identities
     id: alice
     uses: ./jmap

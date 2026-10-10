@@ -149,6 +149,27 @@ func TestParseRequestUsingAlso(t *testing.T) {
 	}
 }
 
+// A step without calls fetches the session alone. What the defaults of a job
+// give for the calls of its other steps does not stop it.
+func TestParseRequestWithoutCalls(t *testing.T) {
+	r, err := parseRequest(map[string]any{
+		"url":        "https://jmap.example.com",
+		"using_also": []any{"urn:example:vendor"},
+		"account_id": "a1",
+		"basic_auth": map[string]any{"username": "alice", "password": "secret"},
+		"timeout":    "5s",
+	})
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(r.calls) != 0 || len(r.using) != 0 {
+		t.Errorf("calls = %v, using = %v, want none", r.calls, r.using)
+	}
+	if r.headers["Authorization"] == "" || r.timeout != 5*time.Second {
+		t.Errorf("headers = %v, timeout = %v", r.headers, r.timeout)
+	}
+}
+
 func TestParseRequestErrors(t *testing.T) {
 	echo := []any{map[string]any{"method": "Core/echo"}}
 	tests := []struct {
@@ -158,8 +179,9 @@ func TestParseRequestErrors(t *testing.T) {
 	}{
 		{"no url", map[string]any{"calls": echo}, "requires with.url"},
 		{"not http", map[string]any{"url": "ftp://x", "calls": echo}, "http or https URL"},
-		{"no calls", map[string]any{"url": "http://x"}, "requires with.calls"},
-		{"empty calls", map[string]any{"url": "http://x", "calls": []any{}}, "requires with.calls"},
+		{"empty calls", map[string]any{"url": "http://x", "calls": []any{}}, "with.calls must be a list of method calls that is not empty"},
+		{"null calls", map[string]any{"url": "http://x", "calls": nil}, "with.calls must be a list of method calls that is not empty"},
+		{"no calls and bad timeout", map[string]any{"url": "http://x", "timeout": "soon"}, "with.timeout"},
 		{"call not object", map[string]any{"url": "http://x", "calls": []any{"Email/get"}}, "calls[0] must be an object"},
 		{"no method", map[string]any{"url": "http://x", "calls": []any{map[string]any{}}}, "calls[0].method is required"},
 		{"method without type", map[string]any{"url": "http://x", "calls": []any{map[string]any{"method": "get"}}}, "must be a type and a method"},
