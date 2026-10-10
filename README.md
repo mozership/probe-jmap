@@ -46,7 +46,8 @@ Probe only takes a full 40-character commit SHA. The notes of each [release](htt
 |---|---|---|---|---|
 | `url` | String | Yes | - | The server, `http` or `https`. A URL with no path is taken as the server, whose session is at `/.well-known/jmap`; a URL with a path is the session URL itself |
 | `calls` | Array | Yes | - | The method calls, sent in one request in this order |
-| `using` | Array | No | inferred | The capabilities the request uses. By default the core capability and those that define the methods in `calls` |
+| `using` | Array | No | inferred | The capabilities the request uses, sent as written. By default the core capability and those that define the methods in `calls` |
+| `using_also` | Array | No | - | Capabilities to add to the inferred ones, such as the one of a vendor. Not a key of JMAP, and not given together with `using` |
 | `account_id` | String | No | primary account | The account of each call whose `args` give no `accountId` |
 | `basic_auth` | Object | No | - | `username` and `password` for HTTP Basic authentication |
 | `headers` | Object | No | - | Request headers, such as `Authorization: Bearer <token>` |
@@ -82,7 +83,22 @@ A back-reference, an argument whose name starts with `#`, may leave out `name`: 
 
 `Blob/copy` is the exception: RFC 8620 defines it, so it is inferred as the core capability, and it is made in the primary account of that capability when the session names one.
 
-A method of any other type needs `using`. When `using` is given, it is sent as written.
+A method of any other type needs `using` or `using_also`:
+
+- `using` replaces what is inferred, and is sent as written. It is how to leave a capability out, or to send one the server does not have.
+- `using_also` is added after what is inferred, without a capability twice. A method of a type that is not in the table is taken to belong to one of them, so the standard types and those of a vendor are written together without listing every capability:
+
+```yaml
+with:
+  using_also: [urn:example:vendor]
+  calls:
+  - method: Mailbox/get
+  - method: x:Domain/query
+```
+
+This sends `using` as the core capability, `urn:ietf:params:jmap:mail` and `urn:example:vendor`. The method of the vendor is given no `accountId`, as its capability is not known.
+
+A step cannot give both. When the `defaults` of a job give `using_also`, a step that gives `using` sets `using_also: null`.
 
 A key of `with` that is not one of the parameters above fails the step before anything is sent, and `probe check` reports it with its line.
 
