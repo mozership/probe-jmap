@@ -21,7 +21,10 @@ type jmapServer struct {
 	sessionCode int
 	// primaryAccounts is what the session names as its primary accounts.
 	primaryAccounts map[string]any
-	api             func(w http.ResponseWriter, calls []any)
+	// state is the state the session names, when it is not empty. The API
+	// answers with the session state "s1".
+	state string
+	api   func(w http.ResponseWriter, calls []any)
 	// sessions and posts are the requests the session and the API got.
 	sessions []*http.Request
 	posts    []map[string]any
@@ -41,11 +44,15 @@ func newJMAPServer(t *testing.T, api func(w http.ResponseWriter, calls []any)) *
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		session := map[string]any{
 			"capabilities":    map[string]any{coreCapability: map[string]any{}},
 			"primaryAccounts": s.primaryAccounts,
 			"apiUrl":          "/api/",
-		})
+		}
+		if s.state != "" {
+			session["state"] = s.state
+		}
+		_ = json.NewEncoder(w).Encode(session)
 	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any

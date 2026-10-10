@@ -49,6 +49,7 @@ Probe only takes a full 40-character commit SHA. The notes of each [release](htt
 | `using` | Array | No | inferred | The capabilities the request uses, sent as written. By default the core capability and those that define the methods in `calls` |
 | `using_also` | Array | No | - | Capabilities to add to the inferred ones, such as the one of a vendor. Not a key of JMAP, and not given together with `using` |
 | `account_id` | String | No | primary account | The account of each call whose `args` give no `accountId` |
+| `keep_session` | Boolean | No | `false` | Keeps the session in the job, so that the later steps that keep it send their calls without fetching it again. See [Keeping the session](#keeping-the-session) |
 | `basic_auth` | Object | No | - | `username` and `password` for HTTP Basic authentication |
 | `headers` | Object | No | - | Request headers, such as `Authorization: Bearer <token>` |
 | `timeout` | Duration | No | `30s` | Time limit for both requests together, as `10s` or a number of seconds. `0` removes it |
@@ -117,6 +118,29 @@ A step without `calls` fetches the session and sends nothing to the API. It is h
 
 Only the key left out does this. `calls` with an empty list or no value fails the step, as a list that lost its calls would otherwise pass for a step that asks for none.
 
+### Keeping the session
+
+The action fetches the session in every step. With `keep_session: true`, a step keeps the session it fetched in the job, and a later step of the job that keeps the session too sends its calls with that one, in one request instead of two. In the `defaults` of a job it applies to every step:
+
+```yaml
+jobs:
+- name: jmap
+  defaults:
+    github.com/mozership/probe-jmap@<commit SHA>:
+      url: https://jmap.example.com
+      keep_session: true
+```
+
+Nothing is fetched before the first step: the first step that keeps the session fetches it, as it would without `keep_session`.
+
+- The session is kept for the session URL and the headers it was asked with, `basic_auth` among them, so a step of another user fetches its own.
+- A step without `calls` asks for the session itself: it always fetches it, and keeps what it got.
+- The API names the state of the session in each response. When that is not the `state` of the session kept, or the API answers with a status other than 2xx, the session is dropped, and the next step fetches it again.
+- A session the server did not give is not kept.
+- The session is kept for one run of the job, and is not shared with another job.
+
+`req.session_kept` tells whether `res.session` is the session the job kept or one fetched for the step, and `rt` is then the time of the API request alone. With a session kept, credentials the server no longer takes show as the response of the API, not as an error of the `session` kind.
+
 ## Result
 
 | Field | Type | Description |
@@ -124,14 +148,14 @@ Only the key left out does this. `calls` with an empty list or no value fails th
 | `res.code` | Integer | HTTP status code |
 | `res.status` | String | HTTP status line, such as `"200 OK"` |
 | `res.headers` | Object | Response headers, keyed by canonical name |
-| `res.session` | Object | The session object as the server sent it, or `null` when there is none |
+| `res.session` | Object | The session object as the server sent it, to this step or to the one that [kept it](#keeping-the-session), or `null` when there is none |
 | `res.results` | Object | The arguments of each method response, keyed by call id. A method error is there too, as the error object |
 | `res.responses` | Array | Every method response in order, as `name`, `args` and `id` |
 | `res.errors` | Array | What failed, described below; empty when nothing did |
 | `res.body` | Any | The whole response body, parsed when it is JSON, otherwise the raw string |
 | `res.rawbody` | String | The unparsed body, present when the body is JSON |
-| `req` | Object | The `session_url`, the API `url`, `using`, the `calls` as sent and the `headers`. In a step without `calls`, `url` is `""` and `using` and `calls` are empty |
-| `rt` | Duration | Time for the session and the API request together |
+| `req` | Object | The `session_url`, `session_kept`, the API `url`, `using`, the `calls` as sent and the `headers`. In a step without `calls`, `url` is `""` and `using` and `calls` are empty |
+| `rt` | Duration | Time for the session and the API request together, or for the API request alone when the session was kept |
 | `status` | Integer | `0` when the API answered 2xx with method responses and `res.errors` is empty, or, in a step without `calls`, when the server gave a session; `1` otherwise |
 
 A JMAP server answers a method it could not run with HTTP 200, so `res.code` alone does not tell that the calls succeeded. `res.errors` gathers every failure, each the error object the server sent with these fields added:

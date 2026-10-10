@@ -172,16 +172,21 @@ jobs:
   defaults:
     ./jmap:
       url: "{{vars.base}}"
+      # The session is fetched once for alice and once for bob, and the
+      # other steps send their calls with the one the job keeps.
+      keep_session: true
       basic_auth:
         username: "alice@{{vars.domain}}"
         password: "{{vars.alice_password}}"
   steps:
   # A step without calls stops at the session, and sends nothing to the API.
+  # It fetches the session whatever the job keeps, and keeps it.
   - name: Read alice's session
     uses: ./jmap
     test: |
       status == 0 && res.code == 200 &&
       req.url == "" && len(req.calls) == 0 && len(res.responses) == 0 &&
+      req.session_kept == false &&
       res.session.username == "alice@" + vars.domain &&
       res.session.capabilities["urn:ietf:params:jmap:mail"] != nil &&
       res.session.apiUrl == vars.base + "/jmap/"
@@ -199,6 +204,7 @@ jobs:
         id: identities
     test: |
       status == 0 &&
+      req.session_kept == true &&
       req.url == vars.base + "/jmap/" &&
       find(res.results.mailboxes.list, #.role == "sent") != nil
     outputs:
@@ -218,6 +224,7 @@ jobs:
         id: push
     test: |
       status == 0 &&
+      req.session_kept == true &&
       len(req.using) == 1 &&
       len(res.results.push.list) == 0
 
@@ -336,6 +343,7 @@ jobs:
           filter: {name: "{{vars.domain}}"}
     test: |
       status == 0 &&
+      req.session_kept == false &&
       req.using == ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"] &&
       res.results.echo.hello == true &&
       res.results.domain.ids == [outputs.domain.id]

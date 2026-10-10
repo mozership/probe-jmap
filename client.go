@@ -38,7 +38,9 @@ type response struct {
 	body any
 }
 
-func (a *Action) do(r *request, guard actionrpc.Guard) (map[string]any, error) {
+// do sends the requests of r. state is what the action left in the job, and
+// the state returned is what it leaves now, or nil to leave it as it is.
+func (a *Action) do(r *request, guard actionrpc.Guard, state map[string]any) (map[string]any, map[string]any, error) {
 	ctx := context.Background()
 	if r.timeout > 0 {
 		var cancel context.CancelFunc
@@ -48,27 +50,44 @@ func (a *Action) do(r *request, guard actionrpc.Guard) (map[string]any, error) {
 	client := a.httpClient(guard)
 	start := time.Now()
 
-	sessionReq, err := a.newRequest(ctx, http.MethodGet, r.sessionURL, nil, r.headers)
-	if err != nil {
-		return nil, err
+	// A step with calls uses the session the job keeps for it. One without
+	// asks for the session itself, so it is fetched whatever is kept.
+	var session map[string]any
+	var apiURL, key string
+	var kept bool
+	var newState map[string]any
+	if r.keepSession {
+		key = r.sessionKey()
+		if len(r.calls) > 0 {
+			session, apiURL, kept = keptSession(state, key)
+		}
 	}
-	sessionRes, err := send(client, sessionReq, guard)
-	if err != nil {
-		return nil, err
-	}
-	session, apiURL, err := readSession(sessionRes)
-	if err != nil {
-		// The server answered, so what it answered is the result, with the
-		// reason the methods were not sent.
-		return result(r, nil, "", nil, sessionReq, sessionRes, []any{map[string]any{
-			"kind":        "session",
-			"description": err.Error(),
-		}}, time.Since(start)), nil
-	}
-
-	if len(r.calls) == 0 {
-		// The step asks for the session alone, and this is it.
-		return result(r, session, "", nil, sessionReq, sessionRes, nil, time.Since(start)), nil
+	if !kept {
+		sessionReq, err := a.newRequest(ctx, http.MethodGet, r.sessionURL, nil, r.headers)
+		if err != nil {
+			return nil, nil, err
+		}
+		sessionRes, err := send(client, sessionReq, guard)
+		if err != nil {
+			return nil, nil, err
+		}
+		session, apiURL, err = readSession(sessionRes)
+		if r.keepSession {
+			// A session the server did not give is kept as none.
+			newState = withSession(state, key, session, apiURL)
+		}
+		if err != nil {
+			// The server answered, so what it answered is the result, with the
+			// reason the methods were not sent.
+			return result(r, nil, "", nil, false, sessionReq, sessionRes, []any{map[string]any{
+				"kind":        "session",
+				"description": err.Error(),
+			}}, time.Since(start)), newState, nil
+		}
+		if len(r.calls) == 0 {
+			// The step asks for the session alone, and this is it.
+			return result(r, session, "", nil, false, sessionReq, sessionRes, nil, time.Since(start)), newState, nil
+		}
 	}
 
 	methodCalls := make([]any, 0, len(r.calls))
@@ -81,18 +100,22 @@ func (a *Action) do(r *request, guard actionrpc.Guard) (map[string]any, error) {
 	}
 	body, err := json.Marshal(map[string]any{"using": r.using, "methodCalls": methodCalls})
 	if err != nil {
-		return nil, fmt.Errorf("with.calls cannot be sent as JSON: %w", err)
+		return nil, nil, fmt.Errorf("with.calls cannot be sent as JSON: %w", err)
 	}
 	apiReq, err := a.newRequest(ctx, http.MethodPost, apiURL, body, r.headers)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	apiReq.Header.Set("Content-Type", "application/json")
 	apiRes, err := send(client, apiReq, guard)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return result(r, session, apiURL, methodCalls, apiReq, apiRes, nil, time.Since(start)), nil
+	if r.keepSession && outdated(session, apiRes) {
+		// The next step that keeps the session fetches it again.
+		newState = withSession(state, key, nil, "")
+	}
+	return result(r, session, apiURL, methodCalls, kept, apiReq, apiRes, nil, time.Since(start)), newState, nil
 }
 
 // httpClient returns the client the requests are sent with, which follows
@@ -221,8 +244,10 @@ func hasArg(args map[string]any, name string) bool {
 
 // result is what the step gets: the request last sent and its response,
 // which is that of the session when the step has no calls or got no
-// session. errs holds the errors found before the method responses, if any.
-func result(r *request, session map[string]any, apiURL string, methodCalls []any, req *http.Request, res *response, errs []any, rt time.Duration) map[string]any {
+// session. kept tells that session is the one the job kept, not one fetched
+// for the step. errs holds the errors found before the method responses, if
+// any.
+func result(r *request, session map[string]any, apiURL string, methodCalls []any, kept bool, req *http.Request, res *response, errs []any, rt time.Duration) map[string]any {
 	responses := []any{}
 	results := map[string]any{}
 	if errs == nil {
@@ -303,11 +328,12 @@ func result(r *request, session map[string]any, apiURL string, methodCalls []any
 
 	return map[string]any{
 		"req": map[string]any{
-			"session_url": r.sessionURL,
-			"url":         apiURL,
-			"using":       sent(r.using),
-			"calls":       sent(methodCalls),
-			"headers":     flattenHeaders(req.Header),
+			"session_url":  r.sessionURL,
+			"session_kept": kept,
+			"url":          apiURL,
+			"using":        sent(r.using),
+			"calls":        sent(methodCalls),
+			"headers":      flattenHeaders(req.Header),
 		},
 		"res":    resMap,
 		"rt":     rt.String(),
