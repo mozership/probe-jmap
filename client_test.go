@@ -19,7 +19,9 @@ import (
 type jmapServer struct {
 	*httptest.Server
 	sessionCode int
-	api         func(w http.ResponseWriter, calls []any)
+	// primaryAccounts is what the session names as its primary accounts.
+	primaryAccounts map[string]any
+	api             func(w http.ResponseWriter, calls []any)
 	// sessions and posts are the requests the session and the API got.
 	sessions []*http.Request
 	posts    []map[string]any
@@ -27,7 +29,10 @@ type jmapServer struct {
 
 func newJMAPServer(t *testing.T, api func(w http.ResponseWriter, calls []any)) *jmapServer {
 	t.Helper()
-	s := &jmapServer{sessionCode: http.StatusOK, api: api}
+	s := &jmapServer{sessionCode: http.StatusOK, api: api, primaryAccounts: map[string]any{
+		"urn:ietf:params:jmap:mail":       "mail-account",
+		"urn:ietf:params:jmap:submission": "submission-account",
+	}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/jmap", func(w http.ResponseWriter, r *http.Request) {
 		s.sessions = append(s.sessions, r.Clone(r.Context()))
@@ -37,12 +42,9 @@ func newJMAPServer(t *testing.T, api func(w http.ResponseWriter, calls []any)) *
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"capabilities": map[string]any{coreCapability: map[string]any{}},
-			"primaryAccounts": map[string]any{
-				"urn:ietf:params:jmap:mail":       "mail-account",
-				"urn:ietf:params:jmap:submission": "submission-account",
-			},
-			"apiUrl": "/api/",
+			"capabilities":    map[string]any{coreCapability: map[string]any{}},
+			"primaryAccounts": s.primaryAccounts,
+			"apiUrl":          "/api/",
 		})
 	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +153,70 @@ func TestRun(t *testing.T) {
 	// The result goes to probe over gRPC, which takes only the types it has.
 	if _, err := actionrpc.Sendable(ret); err != nil {
 		t.Errorf("result cannot be sent to probe: %v", err)
+	}
+}
+
+// A push subscription is tied to no account, so its methods are given no
+// accountId, not even the one with.account_id names.
+func TestRunGivesAccountlessMethodsNoAccount(t *testing.T) {
+	s := newJMAPServer(t, echo)
+
+	ret, err := (&Action{}).Run(map[string]any{
+		"url":        s.URL,
+		"account_id": "a1",
+		"calls": []any{
+			map[string]any{"method": "PushSubscription/get"},
+			map[string]any{"method": "Core/echo"},
+			map[string]any{"method": "Email/get"},
+			map[string]any{"method": "Blob/copy"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if ret["status"] != 0 {
+		t.Errorf("status = %v, want 0", ret["status"])
+	}
+	post := s.posts[0]
+	if want := []any{coreCapability, "urn:ietf:params:jmap:mail"}; !reflect.DeepEqual(post["using"], want) {
+		t.Errorf("using = %v, want %v", post["using"], want)
+	}
+	accounts := []any{}
+	for _, c := range post["methodCalls"].([]any) {
+		accounts = append(accounts, c.([]any)[1].(map[string]any)["accountId"])
+	}
+	if want := []any{nil, nil, "a1", "a1"}; !reflect.DeepEqual(accounts, want) {
+		t.Errorf("accountIds = %v, want %v", accounts, want)
+	}
+}
+
+// A session may name a primary account for the core capability. Blob/copy,
+// a method of that capability, is made in it, not in the one of the blob
+// capability, and a push subscription is still made in none.
+func TestRunPrimaryAccountOfCore(t *testing.T) {
+	s := newJMAPServer(t, echo)
+	s.primaryAccounts = map[string]any{
+		coreCapability:              "core-account",
+		"urn:ietf:params:jmap:blob": "blob-account",
+	}
+
+	_, err := (&Action{}).Run(map[string]any{
+		"url": s.URL,
+		"calls": []any{
+			map[string]any{"method": "Blob/copy"},
+			map[string]any{"method": "Blob/get"},
+			map[string]any{"method": "PushSubscription/get"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	accounts := []any{}
+	for _, c := range s.posts[0]["methodCalls"].([]any) {
+		accounts = append(accounts, c.([]any)[1].(map[string]any)["accountId"])
+	}
+	if want := []any{"core-account", "blob-account", nil}; !reflect.DeepEqual(accounts, want) {
+		t.Errorf("accountIds = %v, want %v", accounts, want)
 	}
 }
 

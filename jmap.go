@@ -23,6 +23,7 @@ const coreCapability = "urn:ietf:params:jmap:core"
 // capability that defines it, for the specifications published as RFCs.
 var capabilities = map[string]string{
 	"Core":             coreCapability,
+	"PushSubscription": coreCapability,
 	"Mailbox":          "urn:ietf:params:jmap:mail",
 	"Thread":           "urn:ietf:params:jmap:mail",
 	"Email":            "urn:ietf:params:jmap:mail",
@@ -37,6 +38,17 @@ var capabilities = map[string]string{
 	"AddressBook":      "urn:ietf:params:jmap:contacts",
 	"ContactCard":      "urn:ietf:params:jmap:contacts",
 }
+
+// methodCapabilities maps a method to the capability that defines it, where
+// that is not the one that defines the other methods of its type: Blob/copy
+// is a method of RFC 8620, and the rest of Blob of RFC 9404.
+var methodCapabilities = map[string]string{
+	"Blob/copy": coreCapability,
+}
+
+// accountless are the types whose methods take no accountId: Core/echo, and
+// a push subscription, which RFC 8620 section 7.2 ties to no account.
+var accountless = []string{"Core", "PushSubscription"}
 
 // params are the keys the action takes in with. action.yml declares them,
 // for probe check to report a key the action does not take.
@@ -265,6 +277,9 @@ func inferUsing(calls []methodCall) ([]string, error) {
 
 // capabilityOf returns the capability that defines method.
 func capabilityOf(method string) (string, bool) {
+	if capability, ok := methodCapabilities[method]; ok {
+		return capability, true
+	}
 	typ, _, _ := strings.Cut(method, "/")
 	capability, ok := capabilities[typ]
 	return capability, ok

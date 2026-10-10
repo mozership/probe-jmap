@@ -198,6 +198,19 @@ jobs:
       Mailboxes: {{join(map(res.results.mailboxes.list, #.name + " (" + (#.role ?? "-") + ")"), ", ")}}
       Identities: {{len(res.results.identities.list)}}
 
+  # A push subscription is tied to no account: the call is sent with the core
+  # capability alone and without an accountId.
+  - name: List alice's push subscriptions
+    uses: ./jmap
+    with:
+      calls:
+      - method: PushSubscription/get
+        id: push
+    test: |
+      status == 0 &&
+      len(req.using) == 1 &&
+      len(res.results.push.list) == 0
+
   - name: Give alice an identity to send as
     uses: ./jmap
     skipif: outputs.alice.identities > 0
