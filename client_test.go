@@ -19,7 +19,12 @@ import (
 type jmapServer struct {
 	*httptest.Server
 	sessionCode int
-	api         func(w http.ResponseWriter, calls []any)
+	// primaryAccounts is what the session names as its primary accounts.
+	primaryAccounts map[string]any
+	// state is the state the session names, when it is not empty. The API
+	// answers with the session state "s1".
+	state string
+	api   func(w http.ResponseWriter, calls []any)
 	// sessions and posts are the requests the session and the API got.
 	sessions []*http.Request
 	posts    []map[string]any
@@ -27,7 +32,10 @@ type jmapServer struct {
 
 func newJMAPServer(t *testing.T, api func(w http.ResponseWriter, calls []any)) *jmapServer {
 	t.Helper()
-	s := &jmapServer{sessionCode: http.StatusOK, api: api}
+	s := &jmapServer{sessionCode: http.StatusOK, api: api, primaryAccounts: map[string]any{
+		"urn:ietf:params:jmap:mail":       "mail-account",
+		"urn:ietf:params:jmap:submission": "submission-account",
+	}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/jmap", func(w http.ResponseWriter, r *http.Request) {
 		s.sessions = append(s.sessions, r.Clone(r.Context()))
@@ -36,14 +44,15 @@ func newJMAPServer(t *testing.T, api func(w http.ResponseWriter, calls []any)) *
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"capabilities": map[string]any{coreCapability: map[string]any{}},
-			"primaryAccounts": map[string]any{
-				"urn:ietf:params:jmap:mail":       "mail-account",
-				"urn:ietf:params:jmap:submission": "submission-account",
-			},
-			"apiUrl": "/api/",
-		})
+		session := map[string]any{
+			"capabilities":    map[string]any{coreCapability: map[string]any{}},
+			"primaryAccounts": s.primaryAccounts,
+			"apiUrl":          "/api/",
+		}
+		if s.state != "" {
+			session["state"] = s.state
+		}
+		_ = json.NewEncoder(w).Encode(session)
 	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -154,6 +163,99 @@ func TestRun(t *testing.T) {
 	}
 }
 
+// A push subscription is tied to no account, so its methods are given no
+// accountId, not even the one with.account_id names.
+func TestRunGivesAccountlessMethodsNoAccount(t *testing.T) {
+	s := newJMAPServer(t, echo)
+
+	ret, err := (&Action{}).Run(map[string]any{
+		"url":        s.URL,
+		"account_id": "a1",
+		"calls": []any{
+			map[string]any{"method": "PushSubscription/get"},
+			map[string]any{"method": "Core/echo"},
+			map[string]any{"method": "Email/get"},
+			map[string]any{"method": "Blob/copy"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if ret["status"] != 0 {
+		t.Errorf("status = %v, want 0", ret["status"])
+	}
+	post := s.posts[0]
+	if want := []any{coreCapability, "urn:ietf:params:jmap:mail"}; !reflect.DeepEqual(post["using"], want) {
+		t.Errorf("using = %v, want %v", post["using"], want)
+	}
+	accounts := []any{}
+	for _, c := range post["methodCalls"].([]any) {
+		accounts = append(accounts, c.([]any)[1].(map[string]any)["accountId"])
+	}
+	if want := []any{nil, nil, "a1", "a1"}; !reflect.DeepEqual(accounts, want) {
+		t.Errorf("accountIds = %v, want %v", accounts, want)
+	}
+}
+
+// A session may name a primary account for the core capability. Blob/copy,
+// a method of that capability, is made in it, not in the one of the blob
+// capability, and a push subscription is still made in none.
+func TestRunPrimaryAccountOfCore(t *testing.T) {
+	s := newJMAPServer(t, echo)
+	s.primaryAccounts = map[string]any{
+		coreCapability:              "core-account",
+		"urn:ietf:params:jmap:blob": "blob-account",
+	}
+
+	_, err := (&Action{}).Run(map[string]any{
+		"url": s.URL,
+		"calls": []any{
+			map[string]any{"method": "Blob/copy"},
+			map[string]any{"method": "Blob/get"},
+			map[string]any{"method": "PushSubscription/get"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	accounts := []any{}
+	for _, c := range s.posts[0]["methodCalls"].([]any) {
+		accounts = append(accounts, c.([]any)[1].(map[string]any)["accountId"])
+	}
+	if want := []any{"core-account", "blob-account", nil}; !reflect.DeepEqual(accounts, want) {
+		t.Errorf("accountIds = %v, want %v", accounts, want)
+	}
+}
+
+// A method of a type using_also stands for is sent, in no account.
+func TestRunUsingAlso(t *testing.T) {
+	s := newJMAPServer(t, echo)
+
+	ret, err := (&Action{}).Run(map[string]any{
+		"url":        s.URL,
+		"using_also": []any{"urn:example:vendor"},
+		"calls": []any{
+			map[string]any{"method": "Mailbox/get"},
+			map[string]any{"method": "x:Domain/query"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	post := s.posts[0]
+	want := []any{coreCapability, "urn:ietf:params:jmap:mail", "urn:example:vendor"}
+	if !reflect.DeepEqual(post["using"], want) {
+		t.Errorf("using = %v, want %v", post["using"], want)
+	}
+	if got := ret["req"].(map[string]any)["using"]; !reflect.DeepEqual(got, []string{coreCapability, "urn:ietf:params:jmap:mail", "urn:example:vendor"}) {
+		t.Errorf("req.using = %v", got)
+	}
+	calls := post["methodCalls"].([]any)
+	if id, ok := calls[1].([]any)[1].(map[string]any)["accountId"]; ok {
+		t.Errorf("x:Domain/query is made in account %v, want none", id)
+	}
+}
+
 // The session is found by a redirect from the well-known URI, as many
 // servers answer it with one.
 func TestRunFollowsRedirectToSession(t *testing.T) {
@@ -254,6 +356,65 @@ func TestRunFailedResponses(t *testing.T) {
 			}
 			tt.check(t, ret["res"].(map[string]any))
 		})
+	}
+}
+
+// A step without calls stops at the session: the API gets nothing, and the
+// result is the response to the session request.
+func TestRunSessionAlone(t *testing.T) {
+	s := newJMAPServer(t, echo)
+
+	ret, _, err := (&Action{}).RunStep(actionrpc.Call{
+		With: map[string]any{
+			"url":        s.URL,
+			"basic_auth": map[string]any{"username": "alice", "password": "secret"},
+		},
+		Guard: actionrpc.Guard{ReadOnly: true},
+	})
+	if err != nil {
+		t.Fatalf("RunStep() error = %v", err)
+	}
+	if len(s.sessions) != 1 || len(s.posts) != 0 {
+		t.Fatalf("got %d session and %d API requests, want 1 and 0", len(s.sessions), len(s.posts))
+	}
+	if got := s.sessions[0].Header.Get("Authorization"); got != "Basic YWxpY2U6c2VjcmV0" {
+		t.Errorf("Authorization = %q", got)
+	}
+	if ret["status"] != 0 {
+		t.Errorf("status = %v, want 0", ret["status"])
+	}
+	req := ret["req"].(map[string]any)
+	if req["url"] != "" || req["session_url"] != s.URL+"/.well-known/jmap" ||
+		len(req["using"].([]string)) != 0 || len(req["calls"].([]any)) != 0 {
+		t.Errorf("req = %v", req)
+	}
+	res := ret["res"].(map[string]any)
+	if res["code"] != 200 || res["session"].(map[string]any)["apiUrl"] != "/api/" ||
+		res["body"].(map[string]any)["apiUrl"] != "/api/" {
+		t.Errorf("res = %v", res)
+	}
+	if len(res["responses"].([]any)) != 0 || len(res["results"].(map[string]any)) != 0 || len(res["errors"].([]any)) != 0 {
+		t.Errorf("res.responses = %v, res.results = %v, res.errors = %v, want none", res["responses"], res["results"], res["errors"])
+	}
+	if _, err := actionrpc.Sendable(ret); err != nil {
+		t.Errorf("result cannot be sent to probe: %v", err)
+	}
+}
+
+// A session the server does not give fails a step without calls as it does
+// one with them.
+func TestRunSessionAloneWithoutSession(t *testing.T) {
+	s := newJMAPServer(t, echo)
+	s.sessionCode = http.StatusUnauthorized
+
+	ret, err := (&Action{}).Run(map[string]any{"url": s.URL})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	res := ret["res"].(map[string]any)
+	errs := res["errors"].([]any)
+	if ret["status"] != 1 || res["code"] != 401 || res["session"] != nil || len(errs) != 1 || errs[0].(map[string]any)["kind"] != "session" {
+		t.Errorf("status = %v, res = %v", ret["status"], res)
 	}
 }
 

@@ -93,6 +93,83 @@ func TestParseRequestKeepsGivenUsingAndName(t *testing.T) {
 	}
 }
 
+// PushSubscription and Blob/copy are of RFC 8620, so they need no more than
+// the core capability, unlike the rest of Blob.
+func TestInferUsingCoreMethods(t *testing.T) {
+	tests := []struct {
+		method string
+		want   []string
+	}{
+		{"PushSubscription/get", []string{coreCapability}},
+		{"PushSubscription/set", []string{coreCapability}},
+		{"Blob/copy", []string{coreCapability}},
+		{"Blob/get", []string{coreCapability, "urn:ietf:params:jmap:blob"}},
+	}
+	for _, tt := range tests {
+		got, err := inferUsing([]methodCall{{method: tt.method}}, nil)
+		if err != nil || !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("inferUsing(%s) = %v, %v, want %v", tt.method, got, err, tt.want)
+		}
+	}
+}
+
+// using_also is added to what is inferred, and stands for the types that are
+// not known.
+func TestParseRequestUsingAlso(t *testing.T) {
+	tests := []struct {
+		name string
+		with map[string]any
+		want []string
+	}{
+		{"added after the inferred", map[string]any{
+			"using_also": []any{"urn:example:vendor"},
+			"calls":      []any{map[string]any{"method": "Mailbox/get"}, map[string]any{"method": "x:Domain/query"}},
+		}, []string{coreCapability, "urn:ietf:params:jmap:mail", "urn:example:vendor"}},
+		{"not twice", map[string]any{
+			"using_also": []any{"urn:ietf:params:jmap:mail", coreCapability, "urn:example:vendor", "urn:example:vendor"},
+			"calls":      []any{map[string]any{"method": "Mailbox/get"}},
+		}, []string{coreCapability, "urn:ietf:params:jmap:mail", "urn:example:vendor"}},
+		{"null is not given", map[string]any{
+			"using_also": nil,
+			"using":      []any{"urn:example:vendor"},
+			"calls":      []any{map[string]any{"method": "x:Domain/query"}},
+		}, []string{"urn:example:vendor"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.with["url"] = "http://localhost"
+			r, err := parseRequest(tt.with)
+			if err != nil {
+				t.Fatalf("parseRequest() error = %v", err)
+			}
+			if !reflect.DeepEqual(r.using, tt.want) {
+				t.Errorf("using = %v, want %v", r.using, tt.want)
+			}
+		})
+	}
+}
+
+// A step without calls fetches the session alone. What the defaults of a job
+// give for the calls of its other steps does not stop it.
+func TestParseRequestWithoutCalls(t *testing.T) {
+	r, err := parseRequest(map[string]any{
+		"url":        "https://jmap.example.com",
+		"using_also": []any{"urn:example:vendor"},
+		"account_id": "a1",
+		"basic_auth": map[string]any{"username": "alice", "password": "secret"},
+		"timeout":    "5s",
+	})
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(r.calls) != 0 || len(r.using) != 0 {
+		t.Errorf("calls = %v, using = %v, want none", r.calls, r.using)
+	}
+	if r.headers["Authorization"] == "" || r.timeout != 5*time.Second {
+		t.Errorf("headers = %v, timeout = %v", r.headers, r.timeout)
+	}
+}
+
 func TestParseRequestErrors(t *testing.T) {
 	echo := []any{map[string]any{"method": "Core/echo"}}
 	tests := []struct {
@@ -102,8 +179,9 @@ func TestParseRequestErrors(t *testing.T) {
 	}{
 		{"no url", map[string]any{"calls": echo}, "requires with.url"},
 		{"not http", map[string]any{"url": "ftp://x", "calls": echo}, "http or https URL"},
-		{"no calls", map[string]any{"url": "http://x"}, "requires with.calls"},
-		{"empty calls", map[string]any{"url": "http://x", "calls": []any{}}, "requires with.calls"},
+		{"empty calls", map[string]any{"url": "http://x", "calls": []any{}}, "with.calls must be a list of method calls that is not empty"},
+		{"null calls", map[string]any{"url": "http://x", "calls": nil}, "with.calls must be a list of method calls that is not empty"},
+		{"no calls and bad timeout", map[string]any{"url": "http://x", "timeout": "soon"}, "with.timeout"},
 		{"call not object", map[string]any{"url": "http://x", "calls": []any{"Email/get"}}, "calls[0] must be an object"},
 		{"no method", map[string]any{"url": "http://x", "calls": []any{map[string]any{}}}, "calls[0].method is required"},
 		{"method without type", map[string]any{"url": "http://x", "calls": []any{map[string]any{"method": "get"}}}, "must be a type and a method"},
@@ -113,7 +191,10 @@ func TestParseRequestErrors(t *testing.T) {
 			map[string]any{"method": "Core/echo", "id": "a"},
 			map[string]any{"method": "Core/echo", "id": "a"},
 		}}, "id of an earlier call"},
-		{"unknown capability", map[string]any{"url": "http://x", "calls": []any{map[string]any{"method": "Calendar/get"}}}, "with.using is needed for Calendar/get"},
+		{"unknown capability", map[string]any{"url": "http://x", "calls": []any{map[string]any{"method": "Calendar/get"}}}, "with.using or with.using_also is needed for Calendar/get"},
+		{"empty using_also", map[string]any{"url": "http://x", "using_also": []any{}, "calls": []any{map[string]any{"method": "Calendar/get"}}}, "is needed for Calendar/get"},
+		{"using_also not list", map[string]any{"url": "http://x", "calls": echo, "using_also": "urn:x"}, "with.using_also must be a list"},
+		{"using and using_also", map[string]any{"url": "http://x", "calls": echo, "using": []any{coreCapability}, "using_also": []any{"urn:x"}}, "cannot be given together"},
 		{"using not list", map[string]any{"url": "http://x", "calls": echo, "using": "urn:x"}, "with.using must be a list"},
 		{"auth and header", map[string]any{"url": "http://x", "calls": echo,
 			"basic_auth": map[string]any{"username": "a", "password": "b"},

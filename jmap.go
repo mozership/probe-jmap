@@ -23,6 +23,7 @@ const coreCapability = "urn:ietf:params:jmap:core"
 // capability that defines it, for the specifications published as RFCs.
 var capabilities = map[string]string{
 	"Core":             coreCapability,
+	"PushSubscription": coreCapability,
 	"Mailbox":          "urn:ietf:params:jmap:mail",
 	"Thread":           "urn:ietf:params:jmap:mail",
 	"Email":            "urn:ietf:params:jmap:mail",
@@ -38,9 +39,20 @@ var capabilities = map[string]string{
 	"ContactCard":      "urn:ietf:params:jmap:contacts",
 }
 
+// methodCapabilities maps a method to the capability that defines it, where
+// that is not the one that defines the other methods of its type: Blob/copy
+// is a method of RFC 8620, and the rest of Blob of RFC 9404.
+var methodCapabilities = map[string]string{
+	"Blob/copy": coreCapability,
+}
+
+// accountless are the types whose methods take no accountId: Core/echo, and
+// a push subscription, which RFC 8620 section 7.2 ties to no account.
+var accountless = []string{"Core", "PushSubscription"}
+
 // params are the keys the action takes in with. action.yml declares them,
 // for probe check to report a key the action does not take.
-var params = []string{"url", "calls", "using", "account_id", "basic_auth", "headers", "timeout"}
+var params = []string{"url", "calls", "using", "using_also", "account_id", "keep_session", "basic_auth", "headers", "timeout"}
 
 // keeps are the kinds of guard the action keeps to, as action.yml declares
 // them: it refuses a method that may write, and a host the run does not
@@ -65,7 +77,9 @@ func (a *Action) Run(with map[string]any) (map[string]any, error) {
 }
 
 // RunStep calls the methods in call.With: it fetches the session, then
-// sends the method calls to the API URL the session names. A response the
+// sends the method calls to the API URL the session names. A step without
+// calls stops at the session, and one that asks for keep_session uses the
+// session the job keeps, returning the state to keep. A response the
 // server sends is a result, whatever its status code or method errors; only
 // a request that gets no response, or one the guard refuses, is an error.
 func (a *Action) RunStep(call actionrpc.Call) (map[string]any, map[string]any, error) {
@@ -81,9 +95,9 @@ func (a *Action) RunStep(call actionrpc.Call) (map[string]any, map[string]any, e
 	if err := checkReadOnly(call.Guard, req.calls); err != nil {
 		return nil, nil, err
 	}
-	ret, err := a.do(req, call.Guard)
+	ret, state, err := a.do(req, call.Guard, call.State)
 	actionrpc.LogOutcome(a.log, "jmap request", ret, err)
-	return ret, nil, err
+	return ret, state, err
 }
 
 type request struct {
@@ -92,8 +106,11 @@ type request struct {
 	using      []string
 	calls      []methodCall
 	accountID  string
-	headers    map[string]string
-	timeout    time.Duration
+	// keepSession has the step use the session the job keeps, and keep the
+	// one it fetches.
+	keepSession bool
+	headers     map[string]string
+	timeout     time.Duration
 }
 
 type methodCall struct {
@@ -126,15 +143,36 @@ func parseRequest(with map[string]any) (*request, error) {
 	}
 	r.sessionURL = u.String()
 
-	if r.calls, err = parseCalls(with["calls"]); err != nil {
+	// A step without with.calls fetches the session alone. What only the
+	// calls use is left unread, as the defaults of a job may give it to a
+	// step that makes none.
+	calls, hasCalls := with["calls"]
+	if !hasCalls {
+		if err := r.parseTransport(with); err != nil {
+			return nil, err
+		}
+		return r, nil
+	}
+	if r.calls, err = parseCalls(calls); err != nil {
 		return nil, err
 	}
 
+	// with.using is the whole of what is sent; with.using_also is added to
+	// what the calls are inferred to use.
+	var also []string
+	if v, ok := with["using_also"]; ok && v != nil {
+		if also, err = stringList(v, "with.using_also"); err != nil {
+			return nil, err
+		}
+	}
 	if v, ok := with["using"]; ok && v != nil {
+		if also != nil {
+			return nil, errors.New("with.using and with.using_also cannot be given together: using is sent as written, and using_also is added to what is inferred")
+		}
 		if r.using, err = stringList(v, "with.using"); err != nil {
 			return nil, err
 		}
-	} else if r.using, err = inferUsing(r.calls); err != nil {
+	} else if r.using, err = inferUsing(r.calls, also); err != nil {
 		return nil, err
 	}
 
@@ -144,10 +182,26 @@ func parseRequest(with map[string]any) (*request, error) {
 		}
 	}
 
+	if err := r.parseTransport(with); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// parseTransport reads what a step takes with or without calls:
+// with.keep_session, with.headers, with.basic_auth and with.timeout.
+func (r *request) parseTransport(with map[string]any) error {
+	var err error
+	if v, ok := with["keep_session"]; ok && v != nil {
+		if r.keepSession, ok = v.(bool); !ok {
+			return fmt.Errorf("with.keep_session must be true or false, not %v", v)
+		}
+	}
+
 	if v, ok := with["headers"]; ok && v != nil {
 		headers, ok := v.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("with.headers must be an object, not %T", v)
+			return fmt.Errorf("with.headers must be an object, not %T", v)
 		}
 		for k, v := range headers {
 			r.headers[k] = fmt.Sprint(v)
@@ -157,11 +211,11 @@ func parseRequest(with map[string]any) (*request, error) {
 	if v, ok := with["basic_auth"]; ok {
 		auth, err := basicAuth(v)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for k := range r.headers {
 			if strings.EqualFold(k, "Authorization") {
-				return nil, errors.New("with.basic_auth and an Authorization header cannot be given together")
+				return errors.New("with.basic_auth and an Authorization header cannot be given together")
 			}
 		}
 		r.headers["Authorization"] = auth
@@ -169,20 +223,22 @@ func parseRequest(with map[string]any) (*request, error) {
 
 	if v, ok := with["timeout"]; ok {
 		if r.timeout, err = parseTimeout(v); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	return r, nil
+	return nil
 }
 
-// parseCalls reads with.calls, a list of method calls. A call without an id
+// parseCalls reads with.calls, a list of method calls that is not empty. A
+// step leaves the key out to make none; a list that is empty or null is
+// more likely one that lost its calls. A call without an id
 // is given "c" and its position, from 0. A back-reference without a name is
 // given the method of the call it refers to.
 func parseCalls(v any) ([]methodCall, error) {
 	list, ok := v.([]any)
 	if !ok || len(list) == 0 {
-		return nil, errors.New("jmap action requires with.calls, a list of method calls")
+		return nil, errors.New("with.calls must be a list of method calls that is not empty; a step that fetches the session alone leaves calls out")
 	}
 	calls := make([]methodCall, 0, len(list))
 	methods := map[string]string{}
@@ -248,14 +304,24 @@ func nameBackReferences(args map[string]any, methods map[string]string) {
 }
 
 // inferUsing returns the capabilities the methods of calls belong to, after
-// the core capability.
-func inferUsing(calls []methodCall) ([]string, error) {
+// the core capability, and then those of also that are not among them. A
+// method of a type that is not known is taken to belong to one of also, and
+// needs with.using when there is none.
+func inferUsing(calls []methodCall, also []string) ([]string, error) {
 	using := []string{coreCapability}
 	for _, c := range calls {
 		capability, ok := capabilityOf(c.method)
 		if !ok {
-			return nil, fmt.Errorf("with.using is needed for %s, as probe-jmap does not know which capability defines it", c.method)
+			if len(also) > 0 {
+				continue
+			}
+			return nil, fmt.Errorf("with.using or with.using_also is needed for %s, as probe-jmap does not know which capability defines it", c.method)
 		}
+		if !slices.Contains(using, capability) {
+			using = append(using, capability)
+		}
+	}
+	for _, capability := range also {
 		if !slices.Contains(using, capability) {
 			using = append(using, capability)
 		}
@@ -265,6 +331,9 @@ func inferUsing(calls []methodCall) ([]string, error) {
 
 // capabilityOf returns the capability that defines method.
 func capabilityOf(method string) (string, bool) {
+	if capability, ok := methodCapabilities[method]; ok {
+		return capability, true
+	}
 	typ, _, _ := strings.Cut(method, "/")
 	capability, ok := capabilities[typ]
 	return capability, ok
