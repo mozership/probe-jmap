@@ -13,6 +13,9 @@
 # mistake of probe-jmap cannot be hidden in the setup.
 name: probe-jmap against Stalwart
 
+actions:
+  jmap: ./jmap
+
 vars:
   # The release the tests are written against. Stalwart moves its settings
   # between minor versions, so a new one is a change to make here on purpose.
@@ -170,7 +173,7 @@ jobs:
   id: mail
   needs: [server]
   defaults:
-    ./jmap:
+    jmap:
       url: "{{vars.base}}"
       # The session is fetched once for alice and once for bob, and the
       # other steps send their calls with the one the job keeps.
@@ -182,7 +185,7 @@ jobs:
   # A step without calls stops at the session, and sends nothing to the API.
   # It fetches the session whatever the job keeps, and keeps it.
   - name: Read alice's session
-    uses: ./jmap
+    uses: jmap
     test: |
       status == 0 && res.code == 200 &&
       req.url == "" && len(req.calls) == 0 && len(res.responses) == 0 &&
@@ -193,7 +196,7 @@ jobs:
 
   - name: Find alice's mailboxes and identities
     id: alice
-    uses: ./jmap
+    uses: jmap
     with:
       calls:
       - method: Mailbox/get
@@ -217,7 +220,7 @@ jobs:
   # A push subscription is tied to no account: the call is sent with the core
   # capability alone and without an accountId.
   - name: List alice's push subscriptions
-    uses: ./jmap
+    uses: jmap
     with:
       calls:
       - method: PushSubscription/get
@@ -229,7 +232,7 @@ jobs:
       len(res.results.push.list) == 0
 
   - name: Give alice an identity to send as
-    uses: ./jmap
+    uses: jmap
     skipif: outputs.alice.identities > 0
     with:
       calls:
@@ -243,7 +246,7 @@ jobs:
 
   - name: Find the identity to send as
     id: identity
-    uses: ./jmap
+    uses: jmap
     with:
       calls:
       - method: Identity/get
@@ -256,7 +259,7 @@ jobs:
   # Email/set makes the message in the sent mailbox, and EmailSubmission/set
   # sends it, naming the message by the creation id "#msg".
   - name: Send a message to bob
-    uses: ./jmap
+    uses: jmap
     with:
       calls:
       - method: Email/set
@@ -294,7 +297,7 @@ jobs:
   # Email/query and Email/get in one request, the ids passed by a
   # back-reference that names no method: probe-jmap fills in Email/query.
   - name: Wait for the message in bob's inbox
-    uses: ./jmap
+    uses: jmap
     with:
       basic_auth:
         username: "bob@{{vars.domain}}"
@@ -327,7 +330,7 @@ jobs:
   # A standard type and one of Stalwart in one request: using_also adds the
   # capability of Stalwart to what Core/echo is inferred to use.
   - name: Find the domain with a type of the vendor
-    uses: ./jmap
+    uses: jmap
     with:
       basic_auth:
         username: "{{outputs.boot.user}}"
@@ -353,14 +356,14 @@ jobs:
 - name: Failures the server reports
   needs: [server, mail]
   defaults:
-    ./jmap:
+    jmap:
       url: "{{vars.base}}"
       basic_auth:
         username: "alice@{{vars.domain}}"
         password: "{{vars.alice_password}}"
   steps:
   - name: A method the server does not know
-    uses: ./jmap
+    uses: jmap
     with:
       using: [urn:ietf:params:jmap:core]
       calls:
@@ -375,7 +378,7 @@ jobs:
       res.errors[0].method == "Nope/get"
 
   - name: A record /set cannot create
-    uses: ./jmap
+    uses: jmap
     with:
       calls:
       - method: Email/set
@@ -395,7 +398,7 @@ jobs:
   # RFC 8620 names this unknownCapability; Stalwart 0.16 answers notRequest.
   # What the action is tested for is the problem details in res.errors.
   - name: A capability the server does not have
-    uses: ./jmap
+    uses: jmap
     with:
       using: [urn:ietf:params:jmap:core, "urn:example:nope"]
       calls:
@@ -408,7 +411,7 @@ jobs:
       res.errors[0].type startsWith "urn:ietf:params:jmap:error:"
 
   - name: A password the server refuses
-    uses: ./jmap
+    uses: jmap
     with:
       basic_auth:
         username: "alice@{{vars.domain}}"
