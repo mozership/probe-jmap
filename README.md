@@ -8,20 +8,22 @@ Probe downloads it the first time a workflow uses it. It needs Probe v1.21.0 or 
 
 ```yaml
 name: Mail over JMAP
+actions:
+  jmap: github.com/mozership/probe-jmap@<commit SHA>
 vars:
   user: "{{JMAP_USER}}"
   pass: "{{JMAP_PASS}}"
 jobs:
 - name: jmap
   defaults:
-    github.com/mozership/probe-jmap@<commit SHA>:
+    jmap:
       url: https://jmap.example.com
       basic_auth:
         username: "{{vars.user}}"
         password: "{{vars.pass}}"
   steps:
   - name: Read the latest message
-    uses: github.com/mozership/probe-jmap@<commit SHA>
+    uses: jmap
     with:
       calls:
       - method: Email/query
@@ -38,7 +40,9 @@ jobs:
     echo: "Latest: {{res.results.email.list[0].subject}}"
 ```
 
-Probe only takes a full 40-character commit SHA. The notes of each [release](https://github.com/mozership/probe-jmap/releases) start with the `uses` line to copy.
+The workflow gives the action a name once, under `actions`, and its steps use the name, as do the `defaults` of its jobs. Probe only takes a full 40-character commit SHA there. The notes of each [release](https://github.com/mozership/probe-jmap/releases) start with the action and its commit to copy.
+
+`actions` needs Probe v1.24.0 or later. With an earlier one, write the action in full in each `uses` and as the key of `defaults`, as `github.com/mozership/probe-jmap@<commit SHA>`.
 
 ## Parameters
 
@@ -109,7 +113,7 @@ A step without `calls` fetches the session and sends nothing to the API. It is h
 
 ```yaml
 - name: Wait for the server
-  uses: github.com/mozership/probe-jmap@<commit SHA>
+  uses: jmap
   retry: {max_attempts: 60, interval: 1s}
   test: status == 0 && res.session.capabilities["urn:ietf:params:jmap:mail"] != nil
 ```
@@ -126,7 +130,7 @@ The action fetches the session in every step. With `keep_session: true`, a step 
 jobs:
 - name: jmap
   defaults:
-    github.com/mozership/probe-jmap@<commit SHA>:
+    jmap:
       url: https://jmap.example.com
       keep_session: true
 ```
