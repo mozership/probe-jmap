@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/linyows/probe/actionrpc"
+	"github.com/mozership/probe/actionrpc"
 )
 
 // maxRedirects is how many redirects a request follows, as many as

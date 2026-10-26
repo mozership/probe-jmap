@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/linyows/probe/actionrpc"
+	"github.com/mozership/probe/actionrpc"
 )
 
 // job runs steps as a job does: each is given the state the one before it

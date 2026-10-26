@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/linyows/probe/actionrpc"
+	"github.com/mozership/probe/actionrpc"
 )
 
 // jmapServer serves a session at /.well-known/jmap that names /api/ as its
