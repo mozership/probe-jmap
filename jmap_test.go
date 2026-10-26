@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/linyows/probe/actionref"
-	"github.com/linyows/probe/actionrpc"
+	"github.com/mozership/probe/actionref"
+	"github.com/mozership/probe/actionrpc"
 )
 
 func TestParseRequest(t *testing.T) {
