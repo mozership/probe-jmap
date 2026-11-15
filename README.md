@@ -4,7 +4,7 @@ A [Probe](https://github.com/mozership/probe) action that calls [JMAP](https://j
 
 A step names the server and the method calls. The action fetches the session, fills in the account of each call, sends the calls in one request, and returns the responses by call id, with the method errors gathered in one list. A step that names no calls fetches the session alone.
 
-Probe downloads it the first time a workflow uses it. It needs Probe v1.21.0 or later, which reads the guard and the params it declares in `action.yml`.
+It is an [external action](https://probe.linyo.ws/guide/concepts/actions#external-actions). Probe downloads it the first time a workflow uses it, and runs the executable whose SHA-256 the `action.yml` at the pinned commit names. It needs Probe v1.21.0 or later, which reads the guard and the params it declares in `action.yml`.
 
 ```yaml
 name: Mail over JMAP
@@ -68,7 +68,7 @@ A call in `calls` takes:
 
 A call whose `args` give neither `accountId` nor `#accountId` is made in `account_id`, or else in the primary account the session names for the capability of the method. `Core/echo` and the methods of `PushSubscription` take no `accountId`, and are given none.
 
-A back-reference, an argument whose name starts with `#`, may leave out `name`: it is given the method of the call that `resultOf` names.
+A back-reference, an argument whose name starts with `#`, may leave out `name`: it is given the method of the call that `resultOf` names. A back-reference takes the place of the whole argument, so it cannot be put inside one, such as inside `filter`.
 
 ### Capabilities
 
@@ -105,7 +105,7 @@ This sends `using` as the core capability, `urn:ietf:params:jmap:mail` and `urn:
 
 A step cannot give both. When the `defaults` of a job give `using_also`, a step that gives `using` sets `using_also: null`.
 
-A key of `with` that is not one of the parameters above fails the step before anything is sent, and `probe check` reports it with its line.
+A key of `with` that is not one of the parameters above fails the step before anything is sent. Its `action.yml` declares the parameters as `params`, so `probe check` reports such a key with its line.
 
 ### The session alone
 
@@ -175,11 +175,92 @@ When the server gives no session, the method calls are not sent, and `res` is th
 
 Any response the server sends is a result, so a test can assert on a method error or a 401. Only a request that gets no response, such as a refused connection or a timeout, fails the step as an error.
 
+## Examples
+
+These examples use the action by the name `jmap` that the workflow gives it under `actions`.
+
+### Sending a message and waiting for it
+
+`Email/set` makes the message and `EmailSubmission/set` sends it, naming the message by its creation id `#msg`. The step that follows waits for it with `retry`.
+
+```yaml
+steps:
+- name: Send a message to bob
+  uses: jmap
+  with:
+    url: "{{vars.url}}"
+    basic_auth: {username: "{{vars.alice}}", password: "{{vars.alice_pass}}"}
+    calls:
+    - method: Email/set
+      id: create
+      args:
+        create:
+          msg:
+            mailboxIds:
+              "{{outputs.alice.sent}}": true
+            from: [{email: "{{vars.alice}}"}]
+            to: [{email: "{{vars.bob}}"}]
+            subject: "{{vars.subject}}"
+            bodyValues: {body: {value: Sent by probe.}}
+            textBody: [{partId: body, type: text/plain}]
+    - method: EmailSubmission/set
+      id: submit
+      args:
+        create:
+          sub:
+            identityId: "{{outputs.alice.identity}}"
+            emailId: "#msg"
+  test: status == 0 && res.results.submit.created.sub.id != nil
+
+- name: Wait for it in bob's mailbox
+  uses: jmap
+  with:
+    url: "{{vars.url}}"
+    basic_auth: {username: "{{vars.bob}}", password: "{{vars.bob_pass}}"}
+    calls:
+    - method: Email/query
+      id: query
+      args:
+        filter: {subject: "{{vars.subject}}"}
+    - method: Email/get
+      id: get
+      args:
+        "#ids": {resultOf: query, path: /ids}
+        properties: [subject, receivedAt]
+  retry:
+    max_attempts: 30
+    interval: 1s
+  test: status == 0 && len(res.results.get.list) == 1
+```
+
+### Asserting on a failure
+
+A record that the server cannot create is in `res.errors`, with the creation id as `key`:
+
+```yaml
+steps:
+- name: A record that cannot be created
+  uses: jmap
+  with:
+    url: "{{vars.url}}"
+    basic_auth: {username: "{{vars.user}}", password: "{{vars.pass}}"}
+    calls:
+    - method: Email/set
+      args:
+        create:
+          bad:
+            mailboxIds: {no-such-mailbox: true}
+  test: |
+    status == 1 &&
+    res.errors[0].kind == "notCreated" &&
+    res.errors[0].key == "bad"
+```
+
 ## Guard
 
 The action keeps to the guard of the run, and its `action.yml` declares `guard: [read-only, allow-host]`, so Probe runs it under `--read-only` and `--allow-host` without `--allow-action`.
 
-Under `--read-only`, a step whose calls include a method other than `/get`, `/query`, `/changes`, `/queryChanges`, `/lookup` and `/echo` is refused before anything is sent. A host that `--allow-host` does not allow is refused, for the session, the API URL and any redirect.
+Under `--read-only`, a step whose calls include a method other than `/get`, `/query`, `/changes`, `/queryChanges`, `/lookup` and `/echo` is refused before anything is sent. A host that `--allow-host` does not allow is refused, for the session, the API URL and any redirect. See [Guard](https://probe.linyo.ws/guide/concepts/guard).
 
 ## Testing
 
