@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/mozership/probe/actionrpc"
+	"github.com/mozership/probe/sdk"
 )
 
 // job runs steps as a job does: each is given the state the one before it
@@ -16,13 +16,13 @@ type job struct {
 
 func (j *job) step(with map[string]any) map[string]any {
 	j.t.Helper()
-	ret, state, err := (&Action{}).RunStep(actionrpc.Call{With: with, State: j.state})
+	ret, state, err := (&Action{}).RunStep(sdk.Call{With: with, State: j.state})
 	if err != nil {
 		j.t.Fatalf("RunStep() error = %v", err)
 	}
 	if state != nil {
 		// The state goes to probe and back over gRPC.
-		sendable, err := actionrpc.Sendable(state)
+		sendable, err := sdk.Sendable(state)
 		if err != nil {
 			j.t.Fatalf("state cannot be sent to probe: %v", err)
 		}

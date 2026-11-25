@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mozership/probe/actionrpc"
+	"github.com/mozership/probe/sdk"
 )
 
 // maxRedirects is how many redirects a request follows, as many as
@@ -40,7 +40,7 @@ type response struct {
 
 // do sends the requests of r. state is what the action left in the job, and
 // the state returned is what it leaves now, or nil to leave it as it is.
-func (a *Action) do(r *request, guard actionrpc.Guard, state map[string]any) (map[string]any, map[string]any, error) {
+func (a *Action) do(r *request, guard sdk.Guard, state map[string]any) (map[string]any, map[string]any, error) {
 	ctx := context.Background()
 	if r.timeout > 0 {
 		var cancel context.CancelFunc
@@ -120,7 +120,7 @@ func (a *Action) do(r *request, guard actionrpc.Guard, state map[string]any) (ma
 
 // httpClient returns the client the requests are sent with, which follows
 // a redirect only to a host the guard allows.
-func (a *Action) httpClient(guard actionrpc.Guard) *http.Client {
+func (a *Action) httpClient(guard sdk.Guard) *http.Client {
 	client := &http.Client{}
 	if a.client != nil {
 		c := *a.client
@@ -149,7 +149,7 @@ func (a *Action) newRequest(ctx context.Context, method, target string, body []b
 }
 
 // send sends req to a host the guard allows, and reads the response.
-func send(client *http.Client, req *http.Request, guard actionrpc.Guard) (*response, error) {
+func send(client *http.Client, req *http.Request, guard sdk.Guard) (*response, error) {
 	if err := checkHost(guard, req.URL); err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func send(client *http.Client, req *http.Request, guard actionrpc.Guard) (*respo
 	if err != nil {
 		// A redirect the guard refused is a refusal, not a failure to reach
 		// the server.
-		if refused := (*actionrpc.Refused)(nil); errors.As(err, &refused) {
+		if refused := (*sdk.Refused)(nil); errors.As(err, &refused) {
 			return nil, refused
 		}
 		return nil, err
@@ -177,7 +177,7 @@ func send(client *http.Client, req *http.Request, guard actionrpc.Guard) (*respo
 
 // checkHost returns a Refused error when the guard does not allow the host
 // of u. A host without a port is taken at the port of its scheme.
-func checkHost(guard actionrpc.Guard, u *url.URL) error {
+func checkHost(guard sdk.Guard, u *url.URL) error {
 	host := u.Host
 	if u.Port() == "" {
 		port := "80"

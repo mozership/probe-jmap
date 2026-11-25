@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mozership/probe/actionrpc"
+	"github.com/mozership/probe/sdk"
 )
 
 // jmapServer serves a session at /.well-known/jmap that names /api/ as its
@@ -158,7 +158,7 @@ func TestRun(t *testing.T) {
 		t.Errorf("rt = %v: %v", ret["rt"], err)
 	}
 	// The result goes to probe over gRPC, which takes only the types it has.
-	if _, err := actionrpc.Sendable(ret); err != nil {
+	if _, err := sdk.Sendable(ret); err != nil {
 		t.Errorf("result cannot be sent to probe: %v", err)
 	}
 }
@@ -364,12 +364,12 @@ func TestRunFailedResponses(t *testing.T) {
 func TestRunSessionAlone(t *testing.T) {
 	s := newJMAPServer(t, echo)
 
-	ret, _, err := (&Action{}).RunStep(actionrpc.Call{
+	ret, _, err := (&Action{}).RunStep(sdk.Call{
 		With: map[string]any{
 			"url":        s.URL,
 			"basic_auth": map[string]any{"username": "alice", "password": "secret"},
 		},
-		Guard: actionrpc.Guard{ReadOnly: true},
+		Guard: sdk.Guard{ReadOnly: true},
 	})
 	if err != nil {
 		t.Fatalf("RunStep() error = %v", err)
@@ -396,7 +396,7 @@ func TestRunSessionAlone(t *testing.T) {
 	if len(res["responses"].([]any)) != 0 || len(res["results"].(map[string]any)) != 0 || len(res["errors"].([]any)) != 0 {
 		t.Errorf("res.responses = %v, res.results = %v, res.errors = %v, want none", res["responses"], res["results"], res["errors"])
 	}
-	if _, err := actionrpc.Sendable(ret); err != nil {
+	if _, err := sdk.Sendable(ret); err != nil {
 		t.Errorf("result cannot be sent to probe: %v", err)
 	}
 }
@@ -437,7 +437,7 @@ func TestRunWithoutSession(t *testing.T) {
 		errs[0].(map[string]any)["kind"] != "session" || !strings.Contains(errs[0].(map[string]any)["description"].(string), "401") {
 		t.Errorf("status = %v, res = %v", ret["status"], res)
 	}
-	if _, err := actionrpc.Sendable(ret); err != nil {
+	if _, err := sdk.Sendable(ret); err != nil {
 		t.Errorf("result cannot be sent to probe: %v", err)
 	}
 }
@@ -469,11 +469,11 @@ func TestRunStepGuard(t *testing.T) {
 	read := []any{map[string]any{"method": "Email/get"}}
 
 	t.Run("read-only refuses a write before sending anything", func(t *testing.T) {
-		_, _, err := (&Action{}).RunStep(actionrpc.Call{
+		_, _, err := (&Action{}).RunStep(sdk.Call{
 			With:  map[string]any{"url": s.URL, "calls": write},
-			Guard: actionrpc.Guard{ReadOnly: true},
+			Guard: sdk.Guard{ReadOnly: true},
 		})
-		if !actionrpc.IsRefused(err) {
+		if !sdk.IsRefused(err) {
 			t.Errorf("RunStep() error = %v, want a refusal", err)
 		}
 		if len(s.sessions) != 0 {
@@ -482,9 +482,9 @@ func TestRunStepGuard(t *testing.T) {
 	})
 
 	t.Run("read-only sends reads", func(t *testing.T) {
-		ret, _, err := (&Action{}).RunStep(actionrpc.Call{
+		ret, _, err := (&Action{}).RunStep(sdk.Call{
 			With:  map[string]any{"url": s.URL, "calls": read},
-			Guard: actionrpc.Guard{ReadOnly: true, AllowHosts: []string{host}},
+			Guard: sdk.Guard{ReadOnly: true, AllowHosts: []string{host}},
 		})
 		if err != nil || ret["status"] != 0 {
 			t.Errorf("RunStep() = %v, %v", ret, err)
@@ -492,11 +492,11 @@ func TestRunStepGuard(t *testing.T) {
 	})
 
 	t.Run("a host the run does not allow", func(t *testing.T) {
-		_, _, err := (&Action{}).RunStep(actionrpc.Call{
+		_, _, err := (&Action{}).RunStep(sdk.Call{
 			With:  map[string]any{"url": s.URL, "calls": read},
-			Guard: actionrpc.Guard{AllowHosts: []string{"jmap.example.com"}},
+			Guard: sdk.Guard{AllowHosts: []string{"jmap.example.com"}},
 		})
-		if !actionrpc.IsRefused(err) {
+		if !sdk.IsRefused(err) {
 			t.Errorf("RunStep() error = %v, want a refusal", err)
 		}
 	})
@@ -505,11 +505,11 @@ func TestRunStepGuard(t *testing.T) {
 		front := httptest.NewServer(http.RedirectHandler(s.URL+"/.well-known/jmap", http.StatusTemporaryRedirect))
 		t.Cleanup(front.Close)
 		u, _ := url.Parse(front.URL)
-		_, _, err := (&Action{}).RunStep(actionrpc.Call{
+		_, _, err := (&Action{}).RunStep(sdk.Call{
 			With:  map[string]any{"url": front.URL, "calls": read},
-			Guard: actionrpc.Guard{AllowHosts: []string{u.Host}},
+			Guard: sdk.Guard{AllowHosts: []string{u.Host}},
 		})
-		if !actionrpc.IsRefused(err) {
+		if !sdk.IsRefused(err) {
 			t.Errorf("RunStep() error = %v, want a refusal", err)
 		}
 	})
