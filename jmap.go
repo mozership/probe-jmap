@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-hclog"
-	"github.com/mozership/probe/actionrpc"
+	"github.com/mozership/probe/sdk"
 )
 
 // DefaultTimeout bounds a step that does not set with.timeout.
@@ -57,7 +57,7 @@ var params = []string{"url", "calls", "using", "using_also", "account_id", "keep
 // keeps are the kinds of guard the action keeps to, as action.yml declares
 // them: it refuses a method that may write, and a host the run does not
 // allow.
-var keeps = []string{actionrpc.KindReadOnly, actionrpc.KindAllowHost}
+var keeps = []string{sdk.KindReadOnly, sdk.KindAllowHost}
 
 // readMethods are the methods, after the data type, that only read. They
 // are what a read-only run sends.
@@ -72,7 +72,7 @@ type Action struct {
 
 // Run calls the methods in with, under no guard.
 func (a *Action) Run(with map[string]any) (map[string]any, error) {
-	ret, _, err := a.RunStep(actionrpc.Call{With: with})
+	ret, _, err := a.RunStep(sdk.Call{With: with})
 	return ret, err
 }
 
@@ -82,11 +82,11 @@ func (a *Action) Run(with map[string]any) (map[string]any, error) {
 // session the job keeps, returning the state to keep. A response the
 // server sends is a result, whatever its status code or method errors; only
 // a request that gets no response, or one the guard refuses, is an error.
-func (a *Action) RunStep(call actionrpc.Call) (map[string]any, map[string]any, error) {
+func (a *Action) RunStep(call sdk.Call) (map[string]any, map[string]any, error) {
 	if a.log == nil {
 		a.log = hclog.NewNullLogger()
 	}
-	actionrpc.LogParams(a.log, "received request parameters", call.With)
+	sdk.LogParams(a.log, "received request parameters", call.With)
 
 	req, err := parseRequest(call.With)
 	if err != nil {
@@ -96,7 +96,7 @@ func (a *Action) RunStep(call actionrpc.Call) (map[string]any, map[string]any, e
 		return nil, nil, err
 	}
 	ret, state, err := a.do(req, call.Guard, call.State)
-	actionrpc.LogOutcome(a.log, "jmap request", ret, err)
+	sdk.LogOutcome(a.log, "jmap request", ret, err)
 	return ret, state, err
 }
 
@@ -341,14 +341,14 @@ func capabilityOf(method string) (string, bool) {
 
 // checkReadOnly returns a Refused error when the run is read-only and one of
 // calls may write: a method that is not one of readMethods.
-func checkReadOnly(guard actionrpc.Guard, calls []methodCall) error {
+func checkReadOnly(guard sdk.Guard, calls []methodCall) error {
 	if !guard.ReadOnly {
 		return nil
 	}
 	for _, c := range calls {
 		_, name, _ := strings.Cut(c.method, "/")
 		if !slices.Contains(readMethods, name) {
-			return actionrpc.Refuse("%s may write, and the run is read-only; only the methods %s are sent", c.method, strings.Join(readMethods, ", "))
+			return sdk.Refuse("%s may write, and the run is read-only; only the methods %s are sent", c.method, strings.Join(readMethods, ", "))
 		}
 	}
 	return nil

@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mozership/probe/actionref"
-	"github.com/mozership/probe/actionrpc"
+	"github.com/mozership/probe/sdk"
 )
 
 func TestParseRequest(t *testing.T) {
@@ -213,15 +212,15 @@ func TestParseRequestErrors(t *testing.T) {
 
 func TestCheckReadOnly(t *testing.T) {
 	reads := []methodCall{{method: "Email/query"}, {method: "Email/get"}, {method: "Mailbox/changes"}, {method: "Core/echo"}}
-	if err := checkReadOnly(actionrpc.Guard{ReadOnly: true}, reads); err != nil {
+	if err := checkReadOnly(sdk.Guard{ReadOnly: true}, reads); err != nil {
 		t.Errorf("checkReadOnly(reads) error = %v", err)
 	}
 	writes := append(reads, methodCall{method: "Email/set"})
-	err := checkReadOnly(actionrpc.Guard{ReadOnly: true}, writes)
-	if !actionrpc.IsRefused(err) || !strings.Contains(err.Error(), "Email/set may write") {
+	err := checkReadOnly(sdk.Guard{ReadOnly: true}, writes)
+	if !sdk.IsRefused(err) || !strings.Contains(err.Error(), "Email/set may write") {
 		t.Errorf("checkReadOnly(writes) error = %v, want a refusal of Email/set", err)
 	}
-	if err := checkReadOnly(actionrpc.Guard{}, writes); err != nil {
+	if err := checkReadOnly(sdk.Guard{}, writes); err != nil {
 		t.Errorf("checkReadOnly() without a guard error = %v", err)
 	}
 }
@@ -259,7 +258,7 @@ func TestManifestsDeclare(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		m, err := actionref.ParseManifest(data)
+		m, err := sdk.ParseManifest(data)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
