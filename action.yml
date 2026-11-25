@@ -4,9 +4,9 @@ guard: [read-only, allow-host]
 params: [url, calls, using, using_also, account_id, keep_session, basic_auth, headers, timeout]
 runs:
   using: binary
-  url: https://github.com/mozership/probe-jmap/releases/download/v0.3.2/probe-jmap_{os}_{arch}
+  url: https://github.com/mozership/probe-jmap/releases/download/v0.3.3/probe-jmap_{os}_{arch}
   checksums:
-    darwin_amd64: "d839853f4a3fc063d7b1ee810e943852475b242b7052e929e2e1471a13d272cf"
-    darwin_arm64: "af72453679bbd4a148c89cbf32c512408396c5c4b4d01569d4e3b85c823d3931"
-    linux_amd64: "9efb1d1c982121431c8bf8a6db53d27eabec68c319e99e56d83154e85b33d602"
-    linux_arm64: "5c678a44fe7ace1fe60172cd1effe84576fa55615d8e4628b8a4ce7e386908f1"
+    darwin_amd64: "19d176e66d59fc4527b2a7d8ce312068eefe6d7748ebbe573d729a5a1f1dedb9"
+    darwin_arm64: "cd3d91ead8991905a19aa5c2a664c298c8cd9e2054f131138ade77258ac86eaa"
+    linux_amd64: "194931d6e3a21004501d37565b233b84924e92febb29406b621a69073018bf03"
+    linux_arm64: "03af5d73147d4201b15b3c6406802f2599c069cadbb4a6d682f1f0a18105dd03"
